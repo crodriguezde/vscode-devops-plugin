@@ -1,0 +1,421 @@
+{
+  "name": "azure-devops-pr-viewer",
+  "displayName": "Azure DevOps PR Viewer",
+  "description": "Visualize and interact with Azure DevOps Pull Requests directly in VSCode",
+  "version": "0.1.0",
+  "publisher": "your-publisher-name",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:azureDevOpsPR.authenticate",
+    "onCommand:azureDevOpsPR.refreshPRs",
+    "onCommand:azureDevOpsPR.openPR",
+    "onView:azureDevOpsPRExplorer"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "azureDevOpsPR.authenticate",
+        "title": "Azure DevOps: Authenticate",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "azureDevOpsPR.refreshPRs",
+        "title": "Azure DevOps: Refresh Pull Requests",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "azureDevOpsPR.openPR",
+        "title": "Azure DevOps: Open Pull Request",
+        "icon": "$(file)"
+      },
+      {
+        "command": "azureDevOpsPR.viewPRDetails",
+        "title": "Azure DevOps: View PR Details",
+        "icon": "$(info)"
+      },
+      {
+        "command": "azureDevOpsPR.viewFile",
+        "title": "Azure DevOps: View File",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "azureDevOpsPR.addComment",
+        "title": "Azure DevOps: Add Comment",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "azureDevOpsPR.approvePR",
+        "title": "Azure DevOps: Approve PR",
+        "icon": "$(check)"
+      },
+      {
+        "command": "azureDevOpsPR.completePR",
+        "title": "Azure DevOps: Complete PR",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "azureDevOpsPR.abandonPR",
+        "title": "Azure DevOps: Abandon PR",
+        "icon": "$(close)"
+      },
+      {
+        "command": "azureDevOpsPR.checkout",
+        "title": "Azure DevOps: Checkout PR Branch",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "azureDevOpsPR.signOut",
+        "title": "Azure DevOps: Sign Out",
+        "icon": "$(sign-out)"
+      },
+      {
+        "command": "azureDevOpsPR.showWorkflowMenu",
+        "title": "Azure DevOps: Review with Cline",
+        "icon": "$(robot)"
+      },
+      {
+        "command": "azureDevOpsPR.configureWorkflows",
+        "title": "Azure DevOps: Configure Cline Workflows",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "azureDevOpsPR.viewFileWithCommitSelection",
+        "title": "Azure DevOps: View File (Enhanced Diff)",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "azureDevOpsPR.toggleInlineComments",
+        "title": "Azure DevOps: Toggle Inline Comments",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "azureDevOpsPR.replyToComment",
+        "title": "Azure DevOps: Reply to Comment",
+        "icon": "$(reply)"
+      },
+      {
+        "command": "azureDevOpsPR.resolveComment",
+        "title": "Azure DevOps: Resolve Comment",
+        "icon": "$(check)"
+      },
+      {
+        "command": "azureDevOpsPR.replyToCommentInline",
+        "title": "Azure DevOps: Reply to Comment (Inline)",
+        "icon": "$(reply)"
+      },
+      {
+        "command": "azureDevOpsPR.resolveCommentInline",
+        "title": "Azure DevOps: Resolve Comment (Inline)",
+        "icon": "$(check)"
+      },
+      {
+        "command": "azureDevOpsPR.showCommentThread",
+        "title": "Azure DevOps: Show Comment Thread",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "azureDevOpsPR.addCommentAtLine",
+        "title": "Azure DevOps: Add Comment at Line",
+        "icon": "$(add)"
+      },
+      {
+        "command": "azureDevOpsPR.refreshInlineComments",
+        "title": "Azure DevOps: Refresh Inline Comments",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "azureDevOpsPR.openSettings",
+        "title": "Azure DevOps: Open Settings",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "azureDevOpsPR.jumpToLine",
+        "title": "Azure DevOps: Jump to Line",
+        "icon": "$(go-to-file)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "azureDevOpsPR",
+          "title": "Azure DevOps PRs",
+          "icon": "resources/devops-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "azureDevOpsPR": [
+        {
+          "id": "azureDevOpsPRExplorer",
+          "name": "Pull Requests"
+        },
+        {
+          "id": "azureDevOpsPRFiles",
+          "name": "PR Files"
+        },
+        {
+          "id": "azureDevOpsPRComments",
+          "name": "Comments"
+        }
+      ]
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "azureDevOpsPR.openPR",
+          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
+          "group": "navigation@1"
+        },
+        {
+          "command": "azureDevOpsPR.viewPRDetails",
+          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
+          "group": "navigation@2"
+        },
+        {
+          "command": "azureDevOpsPR.showWorkflowMenu",
+          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
+          "group": "cline@1"
+        },
+        {
+          "command": "azureDevOpsPR.checkout",
+          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
+          "group": "actions@1"
+        },
+        {
+          "command": "azureDevOpsPR.approvePR",
+          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
+          "group": "actions@2"
+        },
+        {
+          "command": "azureDevOpsPR.completePR",
+          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
+          "group": "actions@3"
+        },
+        {
+          "command": "azureDevOpsPR.abandonPR",
+          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
+          "group": "actions@4"
+        },
+        {
+          "command": "azureDevOpsPR.viewFileWithCommitSelection",
+          "when": "view == azureDevOpsPRFiles && viewItem == prFile",
+          "group": "diff@1"
+        },
+        {
+          "command": "azureDevOpsPR.viewFile",
+          "when": "view == azureDevOpsPRFiles && viewItem == prFile",
+          "group": "diff@2"
+        },
+        {
+          "command": "azureDevOpsPR.addComment",
+          "when": "view == azureDevOpsPRFiles && viewItem == prFile",
+          "group": "comment@1"
+        },
+        {
+          "command": "azureDevOpsPR.replyToComment",
+          "when": "view == azureDevOpsPRComments && viewItem == prComment",
+          "group": "comment@1"
+        },
+        {
+          "command": "azureDevOpsPR.resolveComment",
+          "when": "view == azureDevOpsPRComments && viewItem == prComment",
+          "group": "comment@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "azureDevOpsPR.openSettings",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@0"
+        },
+        {
+          "command": "azureDevOpsPR.configureWorkflows",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "azureDevOpsPR.refreshPRs",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "azureDevOpsPR.toggleInlineComments",
+          "when": "view == azureDevOpsPRComments",
+          "group": "navigation@1"
+        },
+        {
+          "command": "azureDevOpsPR.refreshInlineComments",
+          "when": "view == azureDevOpsPRComments",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "azureDevOpsPR.addCommentAtLine",
+          "when": "editorTextFocus",
+          "group": "azuredevops@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "azureDevOpsPR.addCommentAtLine",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "azureDevOpsPR.toggleInlineComments"
+        },
+        {
+          "command": "azureDevOpsPR.refreshInlineComments"
+        },
+        {
+          "command": "azureDevOpsPR.openSettings"
+        },
+        {
+          "command": "azureDevOpsPR.configureWorkflows"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Azure DevOps PR Viewer",
+      "properties": {
+        "azureDevOpsPR.organization": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps organization URL (e.g., https://dev.azure.com/myorg)"
+        },
+        "azureDevOpsPR.project": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps project name"
+        },
+        "azureDevOpsPR.repository": {
+          "type": "string",
+          "default": "",
+          "description": "Repository name (leave empty to auto-detect from git)"
+        },
+        "azureDevOpsPR.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh PRs on activation"
+        },
+        "azureDevOpsPR.refreshInterval": {
+          "type": "number",
+          "default": 300,
+          "description": "Auto-refresh interval in seconds"
+        },
+        "azureDevOpsPR.authenticationMethod": {
+          "type": "string",
+          "enum": [
+            "oauth",
+            "pat"
+          ],
+          "default": "oauth",
+          "description": "Authentication method: OAuth (Microsoft Account) or PAT (Personal Access Token)"
+        },
+        "azureDevOpsPR.clineIntegration.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Cline workflow integration for PR reviews"
+        },
+        "azureDevOpsPR.clineIntegration.workflowPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to custom Cline workflow definitions (optional)"
+        },
+        "azureDevOpsPR.clineIntegration.enabledWorkflows": {
+          "type": "array",
+          "default": [
+            "review-pr",
+            "analyze-code",
+            "security-scan",
+            "generate-tests"
+          ],
+          "description": "List of enabled workflow names",
+          "items": {
+            "type": "string"
+          }
+        },
+        "azureDevOpsPR.clineIntegration.autoExecute": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically execute workflow when PR is opened"
+        },
+        "azureDevOpsPR.diffViewer.defaultCommitSelection": {
+          "type": "string",
+          "enum": [
+            "latest",
+            "base",
+            "custom"
+          ],
+          "default": "latest",
+          "description": "Default commit selection for diff viewer"
+        },
+        "azureDevOpsPR.diffViewer.showCommitDropdowns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show commit selection dropdowns in diff viewer"
+        },
+        "azureDevOpsPR.comments.inlineDisplay": {
+          "type": "boolean",
+          "default": true,
+          "description": "Display PR comments inline in the editor"
+        },
+        "azureDevOpsPR.comments.showResolved": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show resolved comment threads"
+        },
+        "azureDevOpsPR.autoCheckoutBranch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically checkout the PR branch when opening a PR"
+        },
+        "azureDevOpsPR.ui.panelLayout": {
+          "type": "string",
+          "enum": [
+            "tabs",
+            "split",
+            "accordion"
+          ],
+          "default": "tabs",
+          "description": "Layout style for PR panels"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^3.6.2",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "azure-devops-node-api": "^12.5.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/azure-devops-pr-viewer"
+  },
+  "license": "ISC"
+}
