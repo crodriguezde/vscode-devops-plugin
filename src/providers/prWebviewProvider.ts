@@ -203,12 +203,16 @@ export class PRWebviewProvider {
 
     <div class="section">
         <div class="section-title">Files Changed (${files.length})</div>
-        ${files.map(f => `
+        ${files.map(f => {
+            const changeType = f.changeType ? (typeof f.changeType === 'string' ? f.changeType : String(f.changeType)) : 'Unknown';
+            const changeTypeClass = String(changeType || '').toLowerCase();
+            return `
             <div class="file-item">
-                <span class="file-path">${this.escapeHtml(f.path)}</span>
-                <span class="change-type change-${f.changeType.toLowerCase()}">${f.changeType}</span>
+                <span class="file-path">${this.escapeHtml(f.path || 'Unknown')}</span>
+                <span class="change-type change-${changeTypeClass}">${this.escapeHtml(changeType)}</span>
             </div>
-        `).join('')}
+        `;
+        }).join('')}
     </div>
 
     <div class="section">
@@ -219,37 +223,15 @@ export class PRWebviewProvider {
                 ${thread.comments.map(c => `
                     <div class="comment">
                         <div class="comment-author">${this.escapeHtml(c.author.displayName)}</div>
-                        <div>${this.escapeHtml(c.content)}</div>
+                        <div class="comment-content">${this.renderCommentContent(c.content)}</div>
                     </div>
                 `).join('')}
             </div>
         `).join('')}
     </div>
 
-    <div class="actions">
-        <button onclick="approve()">Approve</button>
-        <button onclick="complete()">Complete</button>
-        <button onclick="abandon()">Abandon</button>
-    </div>
-
     <script>
         const vscode = acquireVsCodeApi();
-        
-        function approve() {
-            vscode.postMessage({ command: 'approve' });
-        }
-        
-        function complete() {
-            if (confirm('Are you sure you want to complete this PR?')) {
-                vscode.postMessage({ command: 'complete' });
-            }
-        }
-        
-        function abandon() {
-            if (confirm('Are you sure you want to abandon this PR?')) {
-                vscode.postMessage({ command: 'abandon' });
-            }
-        }
     </script>
 </body>
 </html>`;
@@ -283,5 +265,35 @@ export class PRWebviewProvider {
         if (vote > 0) return 'vote-approved';
         if (vote < 0) return 'vote-rejected';
         return '';
+    }
+
+    private renderCommentContent(content: string): string {
+        if (!content) {
+            return '';
+        }
+
+        // Check if content contains HTML tags
+        const hasHtmlTags = /<[^>]+>/.test(content);
+        
+        if (hasHtmlTags) {
+            // Sanitize and render HTML content
+            return this.sanitizeHtml(content);
+        } else {
+            // Plain text - escape and preserve line breaks
+            return this.escapeHtml(content).replace(/\n/g, '<br>');
+        }
+    }
+
+    private sanitizeHtml(html: string): string {
+        // Remove script tags and event handlers
+        const sanitized = html
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+            .replace(/on\w+\s*=\s*[^\s>]*/gi, '')
+            .replace(/javascript:/gi, '');
+
+        // Allow safe HTML tags and attributes - just remove dangerous ones
+        // Keep the HTML structure intact for proper rendering
+        return sanitized;
     }
 }

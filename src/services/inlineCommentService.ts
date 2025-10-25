@@ -60,7 +60,7 @@ export class InlineCommentService {
         commentThread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
 
         // Set thread state based on status
-        switch (thread.status.toLowerCase()) {
+        switch (String(thread.status || '').toLowerCase()) {
             case 'active':
                 commentThread.state = vscode.CommentThreadState.Unresolved;
                 break;

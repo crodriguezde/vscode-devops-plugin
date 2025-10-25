@@ -104,7 +104,24 @@ export class InlineCommentProvider implements vscode.Disposable {
 
     private normalizeFilePath(filePath: string): string {
         // Remove leading slash if present
-        return filePath.startsWith('/') ? filePath.substring(1) : filePath;
+        let normalized = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+        
+        // Remove repository folder prefix if present (same logic as diffService)
+        // Azure DevOps paths may include repository name like "safeflyV2/src/file.cs"
+        const gitExtension = vscode.extensions.getExtension('vscode.git');
+        if (gitExtension) {
+            const git = gitExtension.exports.getAPI(1);
+            const repo = git.repositories[0];
+            
+            if (repo) {
+                const gitRootName = repo.rootUri.path.split('/').pop();
+                if (gitRootName && normalized.startsWith(gitRootName + '/')) {
+                    normalized = normalized.substring(gitRootName.length + 1);
+                }
+            }
+        }
+        
+        return normalized;
     }
 
     private updateDecorations(editor: vscode.TextEditor): void {
@@ -118,16 +135,24 @@ export class InlineCommentProvider implements vscode.Disposable {
         }
 
         const documentPath = this.getRelativeFilePath(editor.document.uri);
+        console.log(`[InlineComments] Looking for comments in: ${documentPath}`);
+        console.log(`[InlineComments] Available paths:`, Array.from(this.commentThreads.keys()));
+        
         const threads = this.commentThreads.get(documentPath) || [];
+        console.log(`[InlineComments] Found ${threads.length} threads for ${documentPath}`);
         
         // Filter threads based on settings
         const visibleThreads = threads.filter(thread => 
             showResolved || !thread.isResolved
         );
 
+        console.log(`[InlineComments] Showing ${visibleThreads.length} visible threads (showResolved: ${showResolved})`);
+
         const decorations: vscode.DecorationOptions[] = visibleThreads.map(thread => {
             const line = Math.max(0, thread.lineStart - 1); // Convert to 0-based
             const range = editor.document.lineAt(line).range;
+            
+            console.log(`[InlineComments] Adding decoration at line ${thread.lineStart} for thread ${thread.id}`);
             
             const hoverMessage = this.createHoverMessage(thread);
             
@@ -144,6 +169,7 @@ export class InlineCommentProvider implements vscode.Disposable {
         });
 
         editor.setDecorations(this.decorationType, decorations);
+        console.log(`[InlineComments] Applied ${decorations.length} decorations`);
         
         // Store decorations for later reference
         const commentDecorations: CommentDecoration[] = visibleThreads.map((thread, index) => ({
@@ -156,12 +182,53 @@ export class InlineCommentProvider implements vscode.Disposable {
     }
 
     private getRelativeFilePath(uri: vscode.Uri): string {
+        // Handle git:// scheme URIs (from diff editor)
+        if (uri.scheme === 'git') {
+            try {
+                // Git URIs have the path in the path component
+                let gitPath = uri.path;
+                
+                // Remove leading slash if present
+                if (gitPath.startsWith('/')) {
+                    gitPath = gitPath.substring(1);
+                }
+                
+                // Normalize and return
+                return this.normalizeFilePath(gitPath);
+            } catch (e) {
+                console.error('Failed to parse git URI:', e);
+            }
+        }
+        
+        // Get Git extension to find git root (same logic as diffService and jumpToLine)
+        const gitExtension = vscode.extensions.getExtension('vscode.git');
+        if (gitExtension) {
+            const git = gitExtension.exports.getAPI(1);
+            const repo = git.repositories[0];
+            
+            if (repo) {
+                const gitRoot = repo.rootUri;
+                const gitRootPath = gitRoot.fsPath.replace(/\\/g, '/');
+                let filePath = uri.fsPath.replace(/\\/g, '/');
+                
+                // Make path relative to git root
+                if (filePath.startsWith(gitRootPath)) {
+                    filePath = filePath.substring(gitRootPath.length + 1);
+                }
+                
+                return this.normalizeFilePath(filePath);
+            }
+        }
+        
+        // Fallback to workspace folder
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
         if (workspaceFolder) {
-            return uri.fsPath.substring(workspaceFolder.uri.fsPath.length + 1)
-                .replace(/\\/g, '/');
+            return this.normalizeFilePath(
+                uri.fsPath.substring(workspaceFolder.uri.fsPath.length + 1)
+                    .replace(/\\/g, '/')
+            );
         }
-        return uri.fsPath.replace(/\\/g, '/');
+        return this.normalizeFilePath(uri.fsPath.replace(/\\/g, '/'));
     }
 
     private createHoverMessage(thread: CommentThread): vscode.MarkdownString {

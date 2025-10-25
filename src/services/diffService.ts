@@ -1,156 +1,214 @@
 import * as vscode from 'vscode';
+import { PRFile, PullRequest } from '../types';
 import { AzureDevOpsService } from './azureDevOpsService';
 
 export class DiffService {
     constructor(private azureDevOpsService: AzureDevOpsService) {}
 
-    async showDiff(pullRequestId: number, filePath: string): Promise<void> {
+    /**
+     * Opens a side-by-side diff view for a PR file using local git
+     * Left: Base version (target branch from local git)
+     * Right: Current working copy (checked out source branch)
+     */
+    async openDiff(pr: PullRequest, file: PRFile): Promise<void> {
         try {
-            // Get PR details to find source and target commits
-            const pr = await this.azureDevOpsService.getPullRequest(pullRequestId);
+            // Get workspace folder
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                vscode.window.showWarningMessage('No workspace folder open');
+                return;
+            }
+
+            const workspaceRoot = workspaceFolders[0].uri;
             
-            // Get file content from target branch (original)
-            const originalContent = await this.getFileFromBranch(
-                filePath,
-                pr.targetRefName.replace('refs/heads/', '')
-            );
+            // Normalize the file path
+            const normalizedPath = file.path.startsWith('/') 
+                ? file.path.substring(1) 
+                : file.path;
 
-            // Get file content from source branch (modified)
-            const modifiedContent = await this.getFileFromBranch(
-                filePath,
-                pr.sourceRefName.replace('refs/heads/', '')
-            );
+            // Get branch names
+            const sourceBranch = pr.sourceRefName.replace('refs/heads/', '');
+            const targetBranch = pr.targetRefName.replace('refs/heads/', '');
 
-            // Create virtual documents for comparison
-            const originalUri = vscode.Uri.parse(
-                `azure-devops-diff:${filePath}?ref=${pr.targetRefName}&pr=${pullRequestId}&side=original`
-            );
-            const modifiedUri = vscode.Uri.parse(
-                `azure-devops-diff:${filePath}?ref=${pr.sourceRefName}&pr=${pullRequestId}&side=modified`
-            );
+            // Get Git extension
+            const gitExtension = vscode.extensions.getExtension('vscode.git');
+            if (!gitExtension) {
+                vscode.window.showErrorMessage('Git extension not available');
+                return;
+            }
 
-            // Register text document content provider
-            this.registerDiffProvider(originalContent, modifiedContent, originalUri, modifiedUri);
+            const git = gitExtension.exports.getAPI(1);
+            const repo = git.repositories[0];
+            
+            if (!repo) {
+                vscode.window.showErrorMessage('No git repository found');
+                return;
+            }
 
-            // Show diff editor
+            // Get the git repository root
+            const gitRoot = repo.rootUri;
+            
+            // The file path from Azure DevOps may include the repository name
+            // We need to make it relative to the git root
+            let relativePath = normalizedPath;
+            
+            // If the path starts with a folder name that matches the last segment of git root,
+            // remove it (e.g., "safeflyV2/src/file.cs" -> "src/file.cs")
+            const gitRootName = gitRoot.path.split('/').pop();
+            if (gitRootName && relativePath.startsWith(gitRootName + '/')) {
+                relativePath = relativePath.substring(gitRootName.length + 1);
+            }
+            
+            // Construct full file path relative to git root
+            const fullPath = vscode.Uri.joinPath(gitRoot, relativePath);
+
+            // Left side: target branch (read-only)
+            const baseUri = await this.toGitUri(fullPath, `origin/${targetBranch}`);
+            
+            // Right side: Check if we're on the PR branch
+            const currentBranch = repo.state.HEAD?.name || '';
+            let modifiedUri: vscode.Uri;
+            
+            if (currentBranch === sourceBranch) {
+                // We're on the PR branch - use file:// URI (EDITABLE!)
+                modifiedUri = fullPath;
+            } else {
+                // We're on a different branch - use git:// URI (read-only)
+                modifiedUri = await this.toGitUri(fullPath, sourceBranch);
+            }
+
+            // Open diff editor
+            const fileName = normalizedPath.split('/').pop();
+            const editableIndicator = currentBranch === sourceBranch ? ' ✏️' : '';
+            const title = `${fileName} (${targetBranch} ↔ ${sourceBranch})${editableIndicator}`;
+            
             await vscode.commands.executeCommand(
                 'vscode.diff',
-                originalUri,
+                baseUri,
                 modifiedUri,
-                `${this.getFileName(filePath)} (PR #${pullRequestId})`,
+                title,
                 {
-                    preview: true,
+                    preview: false,
                     preserveFocus: false
                 }
             );
-        } catch (error) {
-            vscode.window.showErrorMessage(`Failed to show diff: ${error}`);
-        }
-    }
 
-    private async getFileFromBranch(filePath: string, branch: string): Promise<string> {
-        try {
-            return await this.azureDevOpsService.getFileContentFromBranch(filePath, branch);
-        } catch (error) {
-            // File might not exist in this branch (new or deleted file)
-            return '';
-        }
-    }
+            // Load inline comments for this file in the diff editor
+            // Wait a moment for the diff editor to open
+            setTimeout(async () => {
+                try {
+                    const threads = await this.azureDevOpsService.getPRThreads(pr.pullRequestId);
+                    const fileThreads = threads.filter((thread: any) => 
+                        thread.threadContext?.filePath === file.path
+                    );
 
-    private registerDiffProvider(
-        originalContent: string,
-        modifiedContent: string,
-        originalUri: vscode.Uri,
-        modifiedUri: vscode.Uri
-    ): void {
-        const provider = new class implements vscode.TextDocumentContentProvider {
-            provideTextDocumentContent(uri: vscode.Uri): string {
-                if (uri.toString() === originalUri.toString()) {
-                    return originalContent;
-                } else if (uri.toString() === modifiedUri.toString()) {
-                    return modifiedContent;
+                    if (fileThreads.length > 0) {
+                        // The inline comment provider will handle displaying these
+                        // We just need to trigger it to load comments for the active file
+                        await vscode.commands.executeCommand('azureDevOpsPR.refreshInlineComments');
+                    }
+                } catch (commentError) {
+                    console.error('Failed to load inline comments:', commentError);
                 }
-                return '';
-            }
-        };
+            }, 500);
 
-        vscode.workspace.registerTextDocumentContentProvider('azure-devops-diff', provider);
-    }
-
-    private getFileName(path: string): string {
-        const parts = path.split('/');
-        return parts[parts.length - 1];
-    }
-
-    async showInlineDiff(pullRequestId: number, filePath: string): Promise<vscode.TextEditor | undefined> {
-        try {
-            const pr = await this.azureDevOpsService.getPullRequest(pullRequestId);
-            const content = await this.azureDevOpsService.getFileContentFromBranch(
-                filePath,
-                pr.sourceRefName.replace('refs/heads/', '')
-            );
-
-            const uri = vscode.Uri.parse(
-                `azure-devops-inline:${filePath}?pr=${pullRequestId}`
-            );
-
-            // Register content provider for inline viewing
-            this.registerInlineProvider(content, uri);
-
-            const doc = await vscode.workspace.openTextDocument(uri);
-            const editor = await vscode.window.showTextDocument(doc, {
-                preview: false,
-                preserveFocus: false
-            });
-
-            // Add decorations for comments
-            await this.addCommentDecorations(editor, pullRequestId, filePath);
-
-            return editor;
         } catch (error) {
-            vscode.window.showErrorMessage(`Failed to show inline diff: ${error}`);
-            return undefined;
+            console.error('Failed to open diff:', error);
+            vscode.window.showErrorMessage(`Failed to open diff: ${error}`);
         }
     }
 
-    private registerInlineProvider(content: string, uri: vscode.Uri): void {
-        const provider = new class implements vscode.TextDocumentContentProvider {
-            provideTextDocumentContent(): string {
-                return content;
-            }
-        };
-
-        vscode.workspace.registerTextDocumentContentProvider('azure-devops-inline', provider);
+    /**
+     * Convert a file URI to a Git URI for a specific ref
+     */
+    private async toGitUri(uri: vscode.Uri, ref: string): Promise<vscode.Uri> {
+        // Use the git extension's toGitUri function for proper URI creation
+        const gitExtension = vscode.extensions.getExtension('vscode.git');
+        if (!gitExtension) {
+            throw new Error('Git extension not available');
+        }
+        
+        const git = gitExtension.exports.getAPI(1);
+        const repo = git.repositories[0];
+        
+        if (!repo) {
+            throw new Error('No git repository found');
+        }
+        
+        // Use the repository's toGitUri method which properly formats the URI
+        try {
+            return await repo.toGitUri(uri, ref);
+        } catch (error) {
+            // Fallback: construct URI manually if toGitUri fails
+            console.warn('toGitUri failed, using fallback:', error);
+            return uri.with({
+                scheme: 'git',
+                query: JSON.stringify({
+                    path: uri.fsPath,
+                    ref: ref
+                })
+            });
+        }
     }
 
-    private async addCommentDecorations(
-        editor: vscode.TextEditor,
-        pullRequestId: number,
-        filePath: string
-    ): Promise<void> {
-        const threads = await this.azureDevOpsService.getPRThreads(pullRequestId);
-        const fileThreads = threads.filter(
-            t => t.threadContext?.filePath === filePath && t.threadContext.rightFileStart
-        );
+    /**
+     * Opens a three-way diff (merge editor style)
+     * Shows base, theirs (target), and yours (source) side-by-side
+     */
+    async openMergeStyleDiff(pr: PullRequest, file: PRFile): Promise<void> {
+        try {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                vscode.window.showWarningMessage('No workspace folder open');
+                return;
+            }
 
-        const decorationType = vscode.window.createTextEditorDecorationType({
-            backgroundColor: new vscode.ThemeColor('editorWarning.background'),
-            isWholeLine: true,
-            overviewRulerColor: new vscode.ThemeColor('editorWarning.foreground'),
-            overviewRulerLane: vscode.OverviewRulerLane.Right
-        });
+            const normalizedPath = file.path.startsWith('/') 
+                ? file.path.substring(1) 
+                : file.path;
 
-        const decorations: vscode.DecorationOptions[] = fileThreads.map(thread => {
-            const line = (thread.threadContext?.rightFileStart?.line || 1) - 1;
-            const range = new vscode.Range(line, 0, line, Number.MAX_VALUE);
-            
-            const comment = thread.comments[0];
-            return {
-                range,
-                hoverMessage: `💬 ${comment.author.displayName}: ${comment.content}`
-            };
-        });
+            const sourceBranch = pr.sourceRefName.replace('refs/heads/', '');
+            const targetBranch = pr.targetRefName.replace('refs/heads/', '');
 
-        editor.setDecorations(decorationType, decorations);
+            // For now, open standard diff (VS Code merge editor requires specific merge conflicts)
+            // But we can make it look like merge editor with proper URIs
+            const baseUri = vscode.Uri.parse(`git:${normalizedPath}?ref=${targetBranch}`);
+            const modifiedUri = vscode.Uri.parse(`git:${normalizedPath}?ref=${sourceBranch}`);
+
+            const title = `📝 ${file.path.split('/').pop()} • ${targetBranch} → ${sourceBranch}`;
+
+            await vscode.commands.executeCommand(
+                'vscode.diff',
+                baseUri,
+                modifiedUri,
+                title,
+                {
+                    preview: false,
+                    preserveFocus: false,
+                    viewColumn: vscode.ViewColumn.Active
+                }
+            );
+
+        } catch (error) {
+            console.error('Failed to open merge-style diff:', error);
+            vscode.window.showErrorMessage(`Failed to open diff: ${error}`);
+        }
+    }
+
+    /**
+     * Gets the content of a file at a specific git ref
+     */
+    async getFileContent(filePath: string, ref: string): Promise<string> {
+        try {
+            const normalizedPath = filePath.startsWith('/') 
+                ? filePath.substring(1) 
+                : filePath;
+
+            const uri = vscode.Uri.parse(`git:${normalizedPath}?ref=${ref}`);
+            const document = await vscode.workspace.openTextDocument(uri);
+            return document.getText();
+        } catch (error) {
+            throw new Error(`Failed to get file content: ${error}`);
+        }
     }
 }

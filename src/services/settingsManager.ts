@@ -10,6 +10,7 @@ export interface ExtensionSettings {
     autoRefresh: boolean;
     refreshInterval: number;
     maxPRsToShow: number;
+    workItemGroupingLevel: number;
     
     // Cline Integration
     clineIntegration: {
@@ -46,6 +47,7 @@ export class SettingsManager {
             autoRefresh: config.get<boolean>('autoRefresh', false),
             refreshInterval: config.get<number>('refreshInterval', 300),
             maxPRsToShow: config.get<number>('maxPRsToShow', 50),
+            workItemGroupingLevel: config.get<number>('workItemGroupingLevel', 1),
             clineIntegration: {
                 enabled: config.get<boolean>('clineIntegration.enabled', true),
                 workflowPath: config.get<string>('clineIntegration.workflowPath', ''),
@@ -111,6 +113,11 @@ export class SettingsManager {
             errors.push('Max PRs to show must be between 1 and 200');
         }
         
+        // Validate work item grouping level
+        if (settings.workItemGroupingLevel < 0 || settings.workItemGroupingLevel > 4) {
+            errors.push('Work item grouping level must be between 0 and 4');
+        }
+        
         // Validate workflow path if custom workflows enabled
         if (settings.clineIntegration.workflowPath && 
             !this.isValidPath(settings.clineIntegration.workflowPath)) {
@@ -140,6 +147,7 @@ export class SettingsManager {
             'autoRefresh',
             'refreshInterval',
             'maxPRsToShow',
+            'workItemGroupingLevel',
             'clineIntegration.enabled',
             'clineIntegration.autoExecute',
             'diffViewer.defaultCommitSelection',

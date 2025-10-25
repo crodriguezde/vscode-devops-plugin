@@ -7,43 +7,8 @@ export class SettingsWebviewProvider {
     constructor(private context: vscode.ExtensionContext) {}
 
     public async showSettings(): Promise<void> {
-        if (this.panel) {
-            this.panel.reveal();
-            return;
-        }
-
-        this.panel = vscode.window.createWebviewPanel(
-            'azureDevOpsPRSettings',
-            'Azure DevOps PR Settings',
-            vscode.ViewColumn.One,
-            {
-                enableScripts: true,
-                retainContextWhenHidden: true
-            }
-        );
-
-        this.panel.webview.html = this.getWebviewContent();
-
-        // Handle messages from webview
-        this.panel.webview.onDidReceiveMessage(
-            async (message) => {
-                await this.handleMessage(message);
-            },
-            undefined,
-            this.context.subscriptions
-        );
-
-        // Clean up when panel is closed
-        this.panel.onDidDispose(() => {
-            this.panel = undefined;
-        });
-
-        // Send current settings to webview
-        const settings = SettingsManager.getSettings();
-        this.panel.webview.postMessage({
-            command: 'loadSettings',
-            settings
-        });
+        // Open the VSCode settings UI filtered to this extension's settings
+        await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:your-publisher-name.azure-devops-pr-viewer');
     }
 
     private async handleMessage(message: any): Promise<void> {
@@ -239,6 +204,17 @@ export class SettingsWebviewProvider {
             <input type="number" id="maxPRsToShow" min="1" max="200" value="50">
             <div class="description">Maximum number of PRs to display (1-200)</div>
         </div>
+        <div class="setting-item">
+            <label for="workItemGroupingLevel">Work Item Grouping Level</label>
+            <select id="workItemGroupingLevel">
+                <option value="0">Level 0 - Group by directly linked work item</option>
+                <option value="1">Level 1 - Group by parent (1 level up)</option>
+                <option value="2">Level 2 - Group by grandparent (2 levels up)</option>
+                <option value="3">Level 3 - Group by 3 levels up from work item</option>
+                <option value="4">Level 4 - Group by 4 levels up from work item</option>
+            </select>
+            <div class="description">Hierarchy level for grouping PRs when using "Group by Work Items" view</div>
+        </div>
     </div>
 
     <div class="setting-group">
@@ -332,6 +308,7 @@ export class SettingsWebviewProvider {
             document.getElementById('autoRefresh').checked = settings.autoRefresh;
             document.getElementById('refreshInterval').value = settings.refreshInterval;
             document.getElementById('maxPRsToShow').value = settings.maxPRsToShow;
+            document.getElementById('workItemGroupingLevel').value = settings.workItemGroupingLevel || 1;
             document.getElementById('clineEnabled').checked = settings.clineIntegration.enabled;
             document.getElementById('clineAutoExecute').checked = settings.clineIntegration.autoExecute;
             document.getElementById('clineWorkflowPath').value = settings.clineIntegration.workflowPath;
@@ -350,6 +327,7 @@ export class SettingsWebviewProvider {
                 autoRefresh: document.getElementById('autoRefresh').checked,
                 refreshInterval: parseInt(document.getElementById('refreshInterval').value),
                 maxPRsToShow: parseInt(document.getElementById('maxPRsToShow').value),
+                workItemGroupingLevel: parseInt(document.getElementById('workItemGroupingLevel').value),
                 clineIntegration: {
                     enabled: document.getElementById('clineEnabled').checked,
                     autoExecute: document.getElementById('clineAutoExecute').checked,

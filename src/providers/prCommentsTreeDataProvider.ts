@@ -84,7 +84,7 @@ export class PRCommentTreeItem extends vscode.TreeItem {
                 : 'General';
             
             this.label = `${fileName}: ${this.truncateText(firstComment.content, 50)}`;
-            this.tooltip = firstComment.content;
+            this.tooltip = this.stripHtml(firstComment.content);
             this.description = `${thread.comments.length} comment${thread.comments.length > 1 ? 's' : ''}`;
             this.contextValue = 'prThread';
             
@@ -94,10 +94,22 @@ export class PRCommentTreeItem extends vscode.TreeItem {
             // Individual comment
             this.label = comment.author.displayName;
             this.description = this.truncateText(comment.content, 50);
-            this.tooltip = `${comment.author.displayName}:\n${comment.content}`;
+            this.tooltip = `${comment.author.displayName}:\n${this.stripHtml(comment.content)}`;
             this.contextValue = 'prComment';
             this.iconPath = new vscode.ThemeIcon('comment');
         }
+    }
+
+    private stripHtml(text: string): string {
+        if (!text) {
+            return '';
+        }
+        
+        // Remove HTML tags and clean up whitespace
+        return text
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
     }
 
     private getFileName(path: string): string {
@@ -106,16 +118,34 @@ export class PRCommentTreeItem extends vscode.TreeItem {
     }
 
     private truncateText(text: string, maxLength: number): string {
-        // Remove markdown and extra whitespace
-        const cleaned = text.replace(/[#*_`]/g, '').replace(/\s+/g, ' ').trim();
-        if (cleaned.length <= maxLength) {
-            return cleaned;
+        if (!text) {
+            return '';
         }
-        return cleaned.substring(0, maxLength) + '...';
+
+        // Check if text contains HTML
+        const hasHtml = /<[^>]+>/.test(text);
+        
+        if (hasHtml) {
+            // Strip HTML tags but preserve the text content
+            const withoutTags = text.replace(/<[^>]+>/g, ' ');
+            const cleaned = withoutTags.replace(/\s+/g, ' ').trim();
+            
+            if (cleaned.length <= maxLength) {
+                return cleaned;
+            }
+            return cleaned.substring(0, maxLength) + '...';
+        } else {
+            // Plain text - remove markdown symbols
+            const cleaned = text.replace(/[#*_`]/g, '').replace(/\s+/g, ' ').trim();
+            if (cleaned.length <= maxLength) {
+                return cleaned;
+            }
+            return cleaned.substring(0, maxLength) + '...';
+        }
     }
 
     private getThreadIcon(status: string): vscode.ThemeIcon {
-        switch (status.toLowerCase()) {
+        switch (String(status || '').toLowerCase()) {
             case 'active':
                 return new vscode.ThemeIcon('comment-discussion', 
                     new vscode.ThemeColor('list.warningForeground'));

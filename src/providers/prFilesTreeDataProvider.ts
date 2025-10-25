@@ -43,23 +43,23 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
             return this.organizeFilesByDirectory(this.files);
         }
 
-        // If element is a directory, show its files
+        // If element is a directory, show its files organized by subdirectory
         if (element.childFiles) {
-            return element.childFiles
-                .filter(file => file.path)
-                .map(file => 
-                    new PRFileTreeItem(
-                        this.currentPR!,
-                        file,
-                        file.path?.split('/').pop() || 'Unknown',
-                        vscode.TreeItemCollapsibleState.Collapsed
-                    )
-                );
+            // Get the directory name from the element label
+            const dirName = element.label as string;
+            
+            // Organize files within this directory
+            return this.organizeFilesInDirectory(element.childFiles, dirName);
         }
 
-        // If element is a file, show its details (changes and comments)
-        if (element.file) {
-            return this.getFileDetails(element);
+        // If element is a file, show commits that modified this file
+        if (element.file && !element.commit) {
+            return this.getFileCommits(element);
+        }
+
+        // If element is a commit under a file, show nothing (leaf node)
+        if (element.commit) {
+            return [];
         }
 
         // If element is "Line Changes" section, show individual changes
@@ -123,25 +123,8 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
         const items: PRFileTreeItem[] = [];
 
         try {
-            // Add "Line Changes" section - will show mock data for now
-            // Real implementation would parse diff hunks from Azure DevOps API
-            const mockChanges = [
-                { line: 10, type: 'add', content: '+ Added new function', filePath: fileItem.file!.path },
-                { line: 25, type: 'edit', content: '~ Modified logic', filePath: fileItem.file!.path },
-                { line: 42, type: 'delete', content: '- Removed old code', filePath: fileItem.file!.path }
-            ];
-
-            items.push(new PRFileTreeItem(
-                this.currentPR!,
-                undefined,
-                `📝 Line Changes (${mockChanges.length})`,
-                vscode.TreeItemCollapsibleState.Collapsed,
-                'diff',
-                undefined,
-                mockChanges
-            ));
-
-            // Add "Comments" section - get from PR threads
+            // Add "Comments" section only - get from PR threads
+            // Line changes are better viewed in the diff editor itself
             try {
                 const threads = await this.azureDevOpsService.getPRThreads(this.currentPR!.pullRequestId);
                 const fileThreads = threads.filter((thread: any) => 
@@ -203,22 +186,36 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
                 continue;
             }
 
-            const parts = file.path.split('/');
+            // Normalize path (remove leading slashes)
+            const normalizedPath = file.path.startsWith('/') ? file.path.substring(1) : file.path;
+            const parts = normalizedPath.split('/').filter(p => p.length > 0);
+            
+            if (parts.length === 0) {
+                console.warn('Skipping file with empty path after normalization:', file);
+                continue;
+            }
+            
             if (parts.length === 1) {
                 rootFiles.push(file);
             } else {
                 const topDir = parts[0];
-                if (!grouped.has(topDir)) {
-                    grouped.set(topDir, []);
+                if (topDir && topDir !== '') {
+                    if (!grouped.has(topDir)) {
+                        grouped.set(topDir, []);
+                    }
+                    grouped.get(topDir)!.push(file);
+                } else {
+                    // If topDir is empty, treat as root file
+                    rootFiles.push(file);
                 }
-                grouped.get(topDir)!.push(file);
             }
         }
 
         const items: PRFileTreeItem[] = [];
 
-        // Add directories
-        for (const [dir, dirFiles] of grouped) {
+        // Add directories (sorted alphabetically)
+        const sortedDirs = Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+        for (const [dir, dirFiles] of sortedDirs) {
             items.push(new PRFileTreeItem(
                 this.currentPR!,
                 undefined,
@@ -229,13 +226,83 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
             ));
         }
 
-        // Add root files
-        for (const file of rootFiles) {
+        // Add root files (sorted alphabetically)
+        const sortedRootFiles = rootFiles.sort((a, b) => 
+            (a.path || '').localeCompare(b.path || '')
+        );
+        for (const file of sortedRootFiles) {
             items.push(new PRFileTreeItem(
                 this.currentPR!,
                 file,
                 this.getFileName(file.path),
-                vscode.TreeItemCollapsibleState.None
+                vscode.TreeItemCollapsibleState.Collapsed
+            ));
+        }
+
+        return items;
+    }
+
+    private organizeFilesInDirectory(files: PRFile[], parentDir: string): PRFileTreeItem[] {
+        // Group files by subdirectory within the parent directory
+        const grouped = new Map<string, PRFile[]>();
+        const directFiles: PRFile[] = [];
+
+        for (const file of files) {
+            if (!file.path) {
+                continue;
+            }
+
+            // Normalize and get path relative to parent directory
+            const normalizedPath = file.path.startsWith('/') ? file.path.substring(1) : file.path;
+            const parts = normalizedPath.split('/').filter(p => p.length > 0);
+            
+            // Find where this file sits relative to parent directory
+            const parentDirIndex = parts.indexOf(parentDir);
+            if (parentDirIndex === -1) {
+                // File doesn't belong to this directory
+                continue;
+            }
+
+            const remainingParts = parts.slice(parentDirIndex + 1);
+            
+            if (remainingParts.length === 1) {
+                // Direct file in this directory
+                directFiles.push(file);
+            } else if (remainingParts.length > 1) {
+                // File in subdirectory
+                const subDir = remainingParts[0];
+                if (!grouped.has(subDir)) {
+                    grouped.set(subDir, []);
+                }
+                grouped.get(subDir)!.push(file);
+            }
+        }
+
+        const items: PRFileTreeItem[] = [];
+
+        // Add subdirectories (sorted alphabetically)
+        const sortedSubDirs = Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+        for (const [subDir, subDirFiles] of sortedSubDirs) {
+            items.push(new PRFileTreeItem(
+                this.currentPR!,
+                undefined,
+                subDir,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'folder',
+                subDirFiles
+            ));
+        }
+
+        // Add direct files (sorted alphabetically)
+        const sortedFiles = directFiles.sort((a, b) => 
+            (a.path || '').localeCompare(b.path || '')
+        );
+        for (const file of sortedFiles) {
+            items.push(new PRFileTreeItem(
+                this.currentPR!,
+                file,
+                this.getFileName(file.path),
+                vscode.TreeItemCollapsibleState.Collapsed
             ));
         }
 
@@ -247,7 +314,115 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
             return 'Unknown';
         }
         const parts = path.split('/');
-        return parts[parts.length - 1];
+        return parts[parts.length - 1] || 'Unknown';
+    }
+
+    private async getFileCommits(fileItem: PRFileTreeItem): Promise<PRFileTreeItem[]> {
+        try {
+            // Get Git extension
+            const gitExtension = vscode.extensions.getExtension('vscode.git');
+            if (!gitExtension) {
+                console.error('Git extension not available');
+                return [];
+            }
+
+            const git = gitExtension.exports.getAPI(1);
+            const repo = git.repositories[0];
+            
+            if (!repo) {
+                console.error('No git repository found');
+                return [];
+            }
+
+            // Get PR branch names
+            const sourceBranch = this.currentPR!.sourceRefName.replace('refs/heads/', '');
+            const targetBranch = this.currentPR!.targetRefName.replace('refs/heads/', '');
+
+            // Normalize file path
+            const gitRoot = repo.rootUri;
+            let normalizedPath = fileItem.file!.path.startsWith('/') 
+                ? fileItem.file!.path.substring(1) 
+                : fileItem.file!.path;
+            
+            // Remove repo name if present
+            const gitRootName = gitRoot.path.split('/').pop();
+            if (gitRootName && normalizedPath.startsWith(gitRootName + '/')) {
+                normalizedPath = normalizedPath.substring(gitRootName.length + 1);
+            }
+
+            // Get commits between target and source branch that modified this file
+            // Use git log command: git log target..source -- <file>
+            const logArgs = [
+                'log',
+                `origin/${targetBranch}..${sourceBranch}`,
+                '--pretty=format:%H|%an|%ae|%aI|%s',
+                '--',
+                normalizedPath
+            ];
+
+            // Execute git log command
+            console.log('[PR Files] Executing git log with args:', logArgs);
+            const result = await repo.exec(logArgs);
+            
+            console.log('[PR Files] Git log result:', {
+                exitCode: result.exitCode,
+                stdout: result.stdout?.substring(0, 200), // First 200 chars
+                stderr: result.stderr
+            });
+            
+            if (!result.stdout || result.stdout.trim().length === 0) {
+                console.log('[PR Files] No commits found for file:', normalizedPath);
+                // Return a message item if no commits found
+                return [
+                    new PRFileTreeItem(
+                        this.currentPR!,
+                        undefined,
+                        'No commits found for this file in this PR',
+                        vscode.TreeItemCollapsibleState.None,
+                        'info'
+                    )
+                ];
+            }
+
+            // Parse commit log output
+            const lines = result.stdout.trim().split('\n').filter((line: string) => line.length > 0);
+            console.log('[PR Files] Found', lines.length, 'commits for', normalizedPath);
+            const fileCommits = lines.map((line: string) => {
+                const [commitId, authorName, authorEmail, date, ...messageParts] = line.split('|');
+                return {
+                    commitId,
+                    author: {
+                        name: authorName,
+                        email: authorEmail,
+                        date: date
+                    },
+                    comment: messageParts.join('|'), // Rejoin in case message contained |
+                    parents: [] // Will be populated if needed
+                };
+            });
+
+            // Already sorted chronologically (newest first) by git log
+            
+            return fileCommits.map((commit: any) => 
+                new PRFileTreeItem(
+                    this.currentPR!,
+                    fileItem.file,
+                    undefined,
+                    vscode.TreeItemCollapsibleState.None,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    commit
+                )
+            );
+        } catch (error) {
+            console.error('Failed to load file commits from git:', error);
+            return [];
+        }
     }
 }
 
@@ -258,7 +433,8 @@ export class PRFileTreeItem extends vscode.TreeItem {
     public readonly change?: any;
     public readonly authorComments?: any[];
     public readonly comment?: any;
-    public readonly itemType: 'directory' | 'file' | 'changes' | 'comments' | 'change' | 'author';
+    public readonly commit?: any;
+    public readonly itemType: 'directory' | 'file' | 'changes' | 'comments' | 'change' | 'author' | 'commit';
 
     constructor(
         public readonly pr: PullRequest,
@@ -271,7 +447,8 @@ export class PRFileTreeItem extends vscode.TreeItem {
         commentsByAuthor?: [string, any[]][], 
         change?: any,
         authorComments?: any[],
-        comment?: any
+        comment?: any,
+        commit?: any
     ) {
         super(label || (file ? file.path : 'Unknown'), collapsibleState);
 
@@ -281,9 +458,28 @@ export class PRFileTreeItem extends vscode.TreeItem {
         this.change = change;
         this.authorComments = authorComments;
         this.comment = comment;
+        this.commit = commit;
 
         // Determine item type
-        if (comment) {
+        if (commit) {
+            // Commit item under a file
+            this.itemType = 'commit';
+            this.contextValue = 'prFileCommit';
+            
+            const shortHash = commit.commitId.substring(0, 7);
+            const message = commit.comment.split('\n')[0];
+            this.label = `${shortHash} ${message}`;
+            this.description = this.formatTimeAgo(commit.author.date);
+            this.iconPath = new vscode.ThemeIcon('git-commit');
+            this.tooltip = `${commit.author.name}\n${new Date(commit.author.date).toLocaleString()}\n\n${commit.comment}`;
+            
+            // Command to view this commit's diff
+            this.command = {
+                command: 'azureDevOpsPR.viewFileCommitDiff',
+                title: 'View Commit Diff',
+                arguments: [this]
+            };
+        } else if (comment) {
             this.itemType = 'change'; // Individual comment
             this.contextValue = 'prComment';
         } else if (authorComments) {
@@ -331,14 +527,12 @@ export class PRFileTreeItem extends vscode.TreeItem {
             // Set icon based on file type
             this.iconPath = this.getFileIcon(file);
 
-            // Files are now expandable - remove direct command
-            if (collapsibleState === vscode.TreeItemCollapsibleState.None) {
-                this.command = {
-                    command: 'azureDevOpsPR.viewFile',
-                    title: 'View File',
-                    arguments: [this]
-                };
-            }
+            // Add double-click command to open diff
+            this.command = {
+                command: 'azureDevOpsPR.viewFile',
+                title: 'View File Diff',
+                arguments: [this]
+            };
         } else {
             this.iconPath = new vscode.ThemeIcon(iconId || 'folder');
         }
@@ -348,16 +542,22 @@ export class PRFileTreeItem extends vscode.TreeItem {
         // Color code by change type
         let color: vscode.ThemeColor | undefined;
         
-        switch (file.changeType?.toLowerCase()) {
-            case 'add':
-                color = new vscode.ThemeColor('gitDecoration.addedResourceForeground');
-                break;
-            case 'edit':
-                color = new vscode.ThemeColor('gitDecoration.modifiedResourceForeground');
-                break;
-            case 'delete':
-                color = new vscode.ThemeColor('gitDecoration.deletedResourceForeground');
-                break;
+        if (file.changeType) {
+            const changeType = typeof file.changeType === 'string'
+                ? file.changeType.toLowerCase()
+                : String(file.changeType || '').toLowerCase();
+                
+            switch (changeType) {
+                case 'add':
+                    color = new vscode.ThemeColor('gitDecoration.addedResourceForeground');
+                    break;
+                case 'edit':
+                    color = new vscode.ThemeColor('gitDecoration.modifiedResourceForeground');
+                    break;
+                case 'delete':
+                    color = new vscode.ThemeColor('gitDecoration.deletedResourceForeground');
+                    break;
+            }
         }
 
         const ext = file.path?.split('.').pop()?.toLowerCase();
@@ -381,13 +581,22 @@ export class PRFileTreeItem extends vscode.TreeItem {
     }
 
     private getChangeTypeText(changeType: string): string {
+        if (!changeType) {
+            return 'Unknown';
+        }
+        
         const typeMap: { [key: string]: string } = {
             'add': 'Added',
             'edit': 'Modified',
             'delete': 'Deleted',
             'rename': 'Renamed'
         };
-        return typeMap[changeType.toLowerCase()] || changeType;
+        
+        const normalizedType = typeof changeType === 'string'
+            ? changeType.toLowerCase()
+            : String(changeType || '').toLowerCase();
+            
+        return typeMap[normalizedType] || String(changeType);
     }
 
     async getChildren(): Promise<PRFileTreeItem[]> {
@@ -403,5 +612,23 @@ export class PRFileTreeItem extends vscode.TreeItem {
                 );
         }
         return [];
+    }
+
+    private formatTimeAgo(dateString: string): string {
+        const date = new Date(dateString);
+        const now = new Date();
+        const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+        
+        if (seconds < 60) return 'just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        if (days < 30) return `${days}d ago`;
+        const months = Math.floor(days / 30);
+        if (months < 12) return `${months}mo ago`;
+        const years = Math.floor(months / 12);
+        return `${years}y ago`;
     }
 }

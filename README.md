@@ -1,242 +1,217 @@
 # Azure DevOps PR Viewer
 
-A VSCode extension for visualizing and interacting with Azure DevOps Pull Requests directly in your editor.
+A powerful Visual Studio Code extension for managing Azure DevOps Pull Requests directly from your editor.
 
 ## Features
 
-- **View Pull Requests**: Browse all active PRs in your repository
-- **PR Details**: View comprehensive PR information including:
-  - Title, description, and metadata
-  - Source and target branches
-  - Reviewers and their vote status
-  - File changes with syntax highlighting
-  - Comment threads
-- **File Navigation**: Browse and view changed files in PR
-- **Comments**: View and add comments to PRs
-- **PR Actions**: Approve, complete, or abandon PRs from VSCode
-- **Branch Checkout**: Quickly checkout PR source branches
-- **Real-time Updates**: Refresh PRs on demand
+### 🎯 Core Functionality
 
-## Prerequisites
+- **Pull Request Management**: View, review, approve, and complete PRs without leaving VSCode
+- **Dual View Modes**: Switch between grouping PRs by people or work items
+- **Work Item Integration**: Automatic linking and hierarchical grouping by work items
+- **Inline Comments**: View and respond to PR comments directly in your code
+- **Enhanced Diff Viewer**: Compare changes with flexible commit selection
+- **Authentication**: Seamless Azure CLI integration for secure authentication
 
-- VSCode 1.75.0 or higher
-- An Azure DevOps account with access to your repository
-- A Personal Access Token (PAT) with Code (Read & Write) permissions
+### 📊 View Modes
+
+#### Group by People (👤)
+Fast, default view that organizes PRs by author:
+- **People** → **Pull Requests**
+- Instant loading on refresh
+- Perfect for team-based workflows
+
+#### Group by Work Items (🏢)
+Hierarchical view that organizes by work item relationships:
+- **Work Items** → **People** → **Pull Requests**
+- Configurable hierarchy levels (0-4)
+- Background loading with progress notifications
+
+### 🔧 Configuration
+
+Access settings via the gear icon (⚙️) in the Pull Requests view or through VSCode settings:
+
+#### Connection Settings
+- **Organization URL**: Your Azure DevOps organization (e.g., `https://dev.azure.com/myorg`)
+- **Project**: Project name
+- **Repository**: Repository name (auto-detects from git if empty)
+
+#### Display Settings
+- **Auto-refresh**: Automatically refresh PRs on startup
+- **Refresh Interval**: How often to refresh (minimum 60 seconds)
+- **Max PRs to Show**: Maximum number of PRs to display (1-200)
+- **Work Item Grouping Level**: Hierarchy level for work item grouping (0-4)
+  - Level 0: Group by directly linked work item
+  - Level 1: Group by parent (1 level up) - Default
+  - Level 2: Group by grandparent (2 levels up)
+  - Level 3: Group by 3 levels up
+  - Level 4: Group by 4 levels up
+
+#### Diff Viewer Settings
+- **Default Commit Selection**: Latest, Base, or Custom
+- **Show Commit Dropdowns**: Display commit selectors in diff viewer
+
+#### Comment Settings
+- **Inline Display**: Show comments directly in editor
+- **Show Resolved**: Display resolved comment threads
+- **Auto-refresh**: Automatically refresh comments on changes
 
 ## Installation
 
-1. Install the extension from the VSCode marketplace (when published)
-2. Or install from VSIX:
+1. Install the extension from the VSCode Marketplace
+2. Install and login to Azure CLI:
    ```bash
-   code --install-extension azure-devops-pr-viewer-0.1.0.vsix
+   az login
    ```
+3. Configure your Azure DevOps organization, project, and repository in settings
 
-## Configuration
+## Usage
 
-1. Open VSCode Settings (Ctrl+,)
-2. Search for "Azure DevOps PR"
-3. Configure the following settings:
+### Getting Started
 
-```json
-{
-  "azureDevOpsPR.organization": "https://dev.azure.com/yourorg",
-  "azureDevOpsPR.project": "YourProject",
-  "azureDevOpsPR.repository": "YourRepo",
-  "azureDevOpsPR.autoRefresh": true,
-  "azureDevOpsPR.refreshInterval": 300
-}
-```
+1. **Open the Extension**: Click the Azure DevOps icon in the Activity Bar
+2. **Configure Settings**: Click the gear icon (⚙️) to set up your organization details
+3. **Refresh**: Click the refresh icon (🔄) to load pull requests
 
-### Settings
+### Managing Pull Requests
 
-- `azureDevOpsPR.organization`: Your Azure DevOps organization URL (e.g., https://dev.azure.com/myorg)
-- `azureDevOpsPR.project`: Project name
-- `azureDevOpsPR.repository`: Repository name (optional - auto-detects from git if not specified)
-- `azureDevOpsPR.autoRefresh`: Automatically refresh PRs on activation (default: true)
-- `azureDevOpsPR.refreshInterval`: Auto-refresh interval in seconds (default: 300)
+#### Viewing PRs
+- Click any PR to view its files and details
+- Use the context menu (right-click) for quick actions
+- Toggle between view modes using the header buttons
 
-## Getting Started
+#### Reviewing PRs
+- **View Files**: Click on any file to see changes
+- **Add Comments**: Right-click in the editor → "Pull Request: Add Comment"
+- **Reply to Comments**: Use the Comments view to respond to threads
+- **Resolve Comments**: Mark comment threads as resolved
 
-### 1. Authenticate
+#### PR Actions
+- **Approve**: Approve a pull request
+- **Complete**: Merge and complete a pull request
+- **Abandon**: Abandon a pull request
+- **Checkout**: Switch to the PR's branch locally
 
-1. Open the Command Palette (Ctrl+Shift+P)
-2. Run: `Azure DevOps: Authenticate`
-3. Enter your Personal Access Token
+### Work Item Integration
 
-**Creating a PAT:**
-1. Go to Azure DevOps → User Settings → Personal Access Tokens
-2. Create a new token with "Code (Read & Write)" scope
-3. Copy the token and paste it when prompted
+When a PR is linked to work items:
+1. Extension fetches the linked work item
+2. Traverses up the work item hierarchy based on configured level
+3. Groups the PR under the appropriate parent work item
+4. Shows hierarchy: Work Item → Person → PR
 
-### 2. View Pull Requests
+**Example with Level 2**:
+- PR linked to Task #123
+- Task #123 → Feature #456 → Epic #789
+- PR grouped under Epic #789
 
-1. Click the Azure DevOps icon in the Activity Bar
-2. The "Pull Requests" view will show all active PRs
-3. Click on a PR to view its details
+### Review Tracking
 
-### 3. Work with PRs
+Mark PRs with your review status:
+- **⏳ Pending My Review**: PRs waiting for your review
+- **✓ Reviewed by Me**: PRs you've already reviewed
 
-**View PR Details:**
-- Click on a PR in the tree view
-- Use Command Palette: `Azure DevOps: View PR Details`
+Toggle these states from the PR context menu.
 
-**Browse Files:**
-- The "PR Files" view shows all changed files
-- Click a file to view its content
-- Files are color-coded by change type (Added/Modified/Deleted)
+## Keyboard Shortcuts
 
-**View Comments:**
-- The "Comments" view shows all comment threads
-- Expand threads to see individual comments
-- Comments are organized by file
-
-**Add Comments:**
-- Right-click on a file in the PR Files view
-- Select "Azure DevOps: Add Comment"
-- Enter your comment text
-
-**Approve PR:**
-- Click on a PR and use Command Palette: `Azure DevOps: Approve PR`
-
-**Complete PR:**
-- Click on a PR and use Command Palette: `Azure DevOps: Complete PR`
-
-**Checkout Branch:**
-- Click on a PR and use Command Palette: `Azure DevOps: Checkout PR Branch`
+- `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac) → Search for "Azure DevOps" commands
+- Quick access to all PR operations through the command palette
 
 ## Commands
 
-All commands are available via Command Palette (Ctrl+Shift+P):
+- `Azure DevOps: Login with Azure CLI` - Authenticate with Azure CLI
+- `Azure DevOps: Refresh Pull Requests` - Manually refresh PR list
+- `Azure DevOps: Open Settings` - Open extension settings
+- `Azure DevOps: Toggle Inline Comments` - Show/hide inline comments
+- `Pull Request: Add Comment` - Add comment at current line
 
-- `Azure DevOps: Authenticate` - Authenticate with Azure DevOps
-- `Azure DevOps: Refresh Pull Requests` - Refresh the PR list
-- `Azure DevOps: Open Pull Request` - Open selected PR
-- `Azure DevOps: View PR Details` - View detailed PR information
-- `Azure DevOps: View File` - View selected file content
-- `Azure DevOps: Add Comment` - Add comment to PR
-- `Azure DevOps: Approve PR` - Approve the PR
-- `Azure DevOps: Complete PR` - Complete (merge) the PR
-- `Azure DevOps: Abandon PR` - Abandon the PR
-- `Azure DevOps: Checkout PR Branch` - Checkout the PR source branch
+## Troubleshooting
 
-## Views
+### Authentication Issues
 
-The extension adds three views to the Activity Bar:
+If you encounter authentication problems:
 
-1. **Pull Requests**: Lists all active PRs with quick info
-2. **PR Files**: Shows files changed in the selected PR
-3. **Comments**: Displays comment threads for the selected PR
+1. Verify Azure CLI is installed and logged in:
+   ```bash
+   az --version
+   az account show
+   ```
 
-## Features Parity with Azure DevOps Web Interface
+2. Ensure your account has access to Azure DevOps:
+   ```bash
+   az devops configure --defaults organization=https://dev.azure.com/yourorg
+   ```
 
-### ✅ Fully Implemented (Complete Parity)
+3. Check required permissions:
+   - Code (Read & Write)
+   - Work Items (Read)
+   - Pull Request Threads (Read & Write)
 
-**Core PR Operations:**
-- View PR list with filtering by status
-- View PR details (title, description, reviewers, metadata)
-- View all changed files with change types
-- View file content with syntax highlighting
-- View all comment threads
-- Add general and file-level comments
-- Approve PRs
-- Complete (merge) PRs
-- Abandon PRs
-- Checkout PR branch locally
-- View reviewer votes and status
+### Work Item Hierarchy Not Showing
 
-**Advanced Features:**
-- ✅ **Side-by-Side Diff Viewer**: Compare original vs modified files side-by-side
-- ✅ **Inline Line Comments**: Add comments on specific code lines with full threading
-- ✅ **Work Item Integration**: Link and view Azure Boards work items
-- ✅ **Build & Policy Status**: View CI/CD pipeline status and policy evaluations
-- ✅ **Merge Conflict Detection**: Detect and view merge conflicts
-- ✅ **PR Iteration History**: View all PR updates and iterations
-- ✅ **Label Management**: Add and remove PR labels
-- ✅ **Completion Options**: Configure squash merge, delete source branch, etc.
-- ✅ **Comment Threading**: Reply to comments and resolve/unresolve threads
-- ✅ **Required Reviewers**: Distinguish between required and optional reviewers
+1. Check that PRs are linked to work items in Azure DevOps
+2. Open Developer Tools (Help → Toggle Developer Tools)
+3. Look for `[WorkItemAtLevel]` logs in the console
+4. Verify the work items have proper parent relationships
 
-### ⚠️ Remaining Limitations
+### PRs Not Loading
 
-The following features are not yet available:
+1. Verify settings are correctly configured
+2. Check repository name matches exactly (case-sensitive)
+3. Ensure Azure CLI authentication is valid
+4. Check the Output panel (View → Output → Azure DevOps PR Viewer)
 
-1. **File Attachments**: Cannot upload or view file attachments
-2. **@Mentions in UI**: No autocomplete for @mentions (but can type them manually)
-3. **PR Description Templates**: Doesn't auto-populate organization templates
-4. **Linked Pull Requests**: Doesn't show related/dependent PRs
-5. **Merge Conflict Resolution UI**: Can detect conflicts but not resolve them in the UI (use git CLI)
+## Technical Details
 
-**The extension now has near-complete parity with Azure DevOps web interface** - all essential PR review and management features are available in VSCode!
+### Architecture
+
+- **Frontend**: VSCode TreeView providers for different views
+- **Backend**: Azure DevOps REST API via `azure-devops-node-api`
+- **Authentication**: Azure CLI token integration
+- **State Management**: Workspace state for PR tracking
+
+### Performance
+
+- **Fast Initial Load**: People view loads immediately
+- **Background Processing**: Work items fetch in background
+- **Reactive Updates**: Settings changes trigger automatic refresh
+- **Efficient Caching**: Minimizes API calls
+
+## Requirements
+
+- Visual Studio Code 1.75.0 or higher
+- Azure CLI installed and configured
+- Access to an Azure DevOps organization
+- Git repository connected to Azure DevOps
 
 ## Development
 
 ### Building from Source
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd vscode-devops-plugin
-
 # Install dependencies
 npm install
 
-# Compile
+# Compile TypeScript
 npm run compile
 
-# Watch for changes
+# Watch mode for development
 npm run watch
-```
-
-### Testing
-
-```bash
-# Run tests
-npm test
-```
-
-### Packaging
-
-```bash
-# Install vsce
-npm install -g @vscode/vsce
 
 # Package extension
-vsce package
+npm run package
 ```
 
-## Troubleshooting
+### Project Structure
 
-### Authentication Issues (401 Errors)
-
-If you're experiencing authentication failures, see the **[PAT Troubleshooting Guide](./TROUBLESHOOTING_PAT.md)** for detailed solutions.
-
-**Quick fixes:**
-- Ensure your PAT has "Code (Read & Write)" permissions
-- Check that your PAT hasn't expired
-- Verify organization URL format: `https://dev.azure.com/yourorg`
-- Make sure token was copied correctly without extra spaces
-- Try signing out and re-authenticating
-
-For detailed troubleshooting steps, **see [TROUBLESHOOTING_PAT.md](./TROUBLESHOOTING_PAT.md)**.
-
-### OAuth Alternative
-
-If PAT authentication continues to fail, try OAuth:
-1. Run `Azure DevOps: Authenticate`
-2. Choose "GitHub Account (OAuth)"
-3. Follow the browser authentication flow
-
-See the **[Authentication Guide](./AUTHENTICATION_GUIDE.md)** for more details on both methods.
-
-**PRs Not Loading:**
-- Check your internet connection
-- Verify organization, project, and repository settings
-- Ensure you have access to the repository in Azure DevOps
-
-**Files Not Displaying:**
-- Some file types may not be supported for preview
-- Large files may take longer to load
-- Binary files cannot be displayed
+```
+src/
+├── auth/           # Authentication providers
+├── providers/      # VSCode tree data providers
+├── services/       # Business logic and API calls
+└── types/          # TypeScript type definitions
+```
 
 ## Contributing
 
@@ -244,12 +219,28 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## License
 
-ISC
+MIT License - See LICENSE file for details
 
 ## Support
 
-For issues and feature requests, please use the GitHub Issues page.
+For issues, questions, or feature requests:
+- Open an issue on GitHub
+- Check the Troubleshooting section above
+- Review VSCode Output panel for detailed logs
+
+## Changelog
+
+### Version 0.1.0 (Current)
+
+- Initial release
+- Dual view modes (People/Work Items)
+- Work item hierarchy support (0-4 levels)
+- Inline comment integration
+- Enhanced diff viewer with commit selection
+- Azure CLI authentication
+- PR review tracking
+- Comprehensive settings UI
 
 ---
 
-**Enjoy!** 🚀
+**Made with ❤️ for Azure DevOps users**
