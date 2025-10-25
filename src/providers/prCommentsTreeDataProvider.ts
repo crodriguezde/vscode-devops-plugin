@@ -39,29 +39,19 @@ export class PRCommentsTreeDataProvider implements vscode.TreeDataProvider<PRCom
         }
 
         if (!element) {
-            // Root level - show all threads
+            // Root level - show only thread roots (no children)
             return this.threads.map(thread => 
                 new PRCommentTreeItem(
                     this.currentPR!,
                     thread,
                     undefined,
-                    vscode.TreeItemCollapsibleState.Collapsed,
+                    vscode.TreeItemCollapsibleState.None, // Changed from Collapsed to None
                     true
-                )
-            );
-        } else if (element.thread) {
-            // Show comments in thread
-            return element.thread.comments.map(comment =>
-                new PRCommentTreeItem(
-                    this.currentPR!,
-                    element.thread!,
-                    comment,
-                    vscode.TreeItemCollapsibleState.None,
-                    false
                 )
             );
         }
 
+        // Don't show children - threads are not expandable
         return [];
     }
 }
@@ -90,6 +80,20 @@ export class PRCommentTreeItem extends vscode.TreeItem {
             
             // Icon based on thread status
             this.iconPath = this.getThreadIcon(thread.status);
+            
+            // Add command to jump to comment location in diff
+            if (thread.threadContext?.filePath && thread.threadContext?.rightFileStart) {
+                this.command = {
+                    command: 'azureDevOpsPR.jumpToCommentInDiff',
+                    title: 'Jump to Comment',
+                    arguments: [{
+                        pr: pr,
+                        filePath: thread.threadContext.filePath,
+                        lineNumber: thread.threadContext.rightFileStart.line,
+                        thread: thread
+                    }]
+                };
+            }
         } else if (comment) {
             // Individual comment
             this.label = comment.author.displayName;
@@ -97,6 +101,20 @@ export class PRCommentTreeItem extends vscode.TreeItem {
             this.tooltip = `${comment.author.displayName}:\n${this.stripHtml(comment.content)}`;
             this.contextValue = 'prComment';
             this.iconPath = new vscode.ThemeIcon('comment');
+            
+            // Add command to jump to comment location in diff
+            if (thread?.threadContext?.filePath && thread?.threadContext?.rightFileStart) {
+                this.command = {
+                    command: 'azureDevOpsPR.jumpToCommentInDiff',
+                    title: 'Jump to Comment',
+                    arguments: [{
+                        pr: pr,
+                        filePath: thread.threadContext.filePath,
+                        lineNumber: thread.threadContext.rightFileStart.line,
+                        thread: thread
+                    }]
+                };
+            }
         }
     }
 

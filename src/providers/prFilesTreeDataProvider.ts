@@ -8,6 +8,7 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
 
     private currentPR?: PullRequest;
     private files: PRFile[] = [];
+    private commentCounts: Map<string, number> = new Map();
 
     constructor(private azureDevOpsService: AzureDevOpsService) {}
 
@@ -39,8 +40,36 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
         }
 
         if (!element) {
-            // Root level - organize files by directory structure
-            return this.organizeFilesByDirectory(this.files);
+            // Root level - show PR info as single root item
+            const prInfoLabel = `PR #${this.currentPR.pullRequestId}: ${this.currentPR.title}`;
+            return [new PRFileTreeItem(
+                this.currentPR,
+                undefined,
+                prInfoLabel,
+                vscode.TreeItemCollapsibleState.Expanded,
+                'info',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                true // isPRInfo flag
+            )];
+        }
+        
+        // Handle PR info expansion to show details + files
+        if (element.isPRInfo && this.currentPR) {
+            const items: PRFileTreeItem[] = [];
+            
+            // Add PR metadata
+            items.push(...this.getPRInfoDetails());
+            
+            // Add files structure
+            items.push(...this.organizeFilesByDirectory(this.files));
+            
+            return items;
         }
 
         // If element is a directory, show its files organized by subdirectory
@@ -52,13 +81,8 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
             return this.organizeFilesInDirectory(element.childFiles, dirName);
         }
 
-        // If element is a file, show commits that modified this file
-        if (element.file && !element.commit) {
-            return this.getFileCommits(element);
-        }
-
-        // If element is a commit under a file, show nothing (leaf node)
-        if (element.commit) {
+        // If element is a file with no comment, it's a leaf node
+        if (element.file && !element.comment) {
             return [];
         }
 
@@ -117,6 +141,59 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
         }
 
         return [];
+    }
+
+    private getPRInfoDetails(): PRFileTreeItem[] {
+        if (!this.currentPR) {
+            return [];
+        }
+
+        const items: PRFileTreeItem[] = [];
+        const pr = this.currentPR;
+
+        // Author
+        items.push(new PRFileTreeItem(
+            pr,
+            undefined,
+            `Author: ${pr.createdBy?.displayName || 'Unknown'}`,
+            vscode.TreeItemCollapsibleState.None,
+            'person'
+        ));
+
+        // Branches
+        const sourceBranch = pr.sourceRefName.replace('refs/heads/', '');
+        const targetBranch = pr.targetRefName.replace('refs/heads/', '');
+        items.push(new PRFileTreeItem(
+            pr,
+            undefined,
+            `Branch: ${sourceBranch} → ${targetBranch}`,
+            vscode.TreeItemCollapsibleState.None,
+            'git-branch'
+        ));
+
+        // Status
+        const status = pr.isDraft ? 'Draft' : 
+                      pr.status === 1 || pr.status === 'active' ? 'Active' :
+                      pr.status === 3 || pr.status === 'completed' ? 'Completed' :
+                      pr.status === 2 || pr.status === 'abandoned' ? 'Abandoned' : 'Unknown';
+        items.push(new PRFileTreeItem(
+            pr,
+            undefined,
+            `Status: ${status}`,
+            vscode.TreeItemCollapsibleState.None,
+            'info'
+        ));
+
+        // File count
+        items.push(new PRFileTreeItem(
+            pr,
+            undefined,
+            `Files Changed: ${this.files.length}`,
+            vscode.TreeItemCollapsibleState.None,
+            'files'
+        ));
+
+        return items;
     }
 
     private async getFileDetails(fileItem: PRFileTreeItem): Promise<PRFileTreeItem[]> {
@@ -434,6 +511,7 @@ export class PRFileTreeItem extends vscode.TreeItem {
     public readonly authorComments?: any[];
     public readonly comment?: any;
     public readonly commit?: any;
+    public readonly isPRInfo?: boolean;
     public readonly itemType: 'directory' | 'file' | 'changes' | 'comments' | 'change' | 'author' | 'commit';
 
     constructor(
@@ -448,7 +526,8 @@ export class PRFileTreeItem extends vscode.TreeItem {
         change?: any,
         authorComments?: any[],
         comment?: any,
-        commit?: any
+        commit?: any,
+        isPRInfo?: boolean
     ) {
         super(label || (file ? file.path : 'Unknown'), collapsibleState);
 
@@ -459,6 +538,16 @@ export class PRFileTreeItem extends vscode.TreeItem {
         this.authorComments = authorComments;
         this.comment = comment;
         this.commit = commit;
+        this.isPRInfo = isPRInfo;
+
+        // Special handling for PR info header
+        if (isPRInfo) {
+            this.itemType = 'directory';
+            this.contextValue = 'prInfo';
+            this.iconPath = new vscode.ThemeIcon('git-pull-request', new vscode.ThemeColor('terminal.ansiBlue'));
+            this.tooltip = `Pull Request #${pr.pullRequestId}\n${pr.title}`;
+            return;
+        }
 
         // Determine item type
         if (commit) {

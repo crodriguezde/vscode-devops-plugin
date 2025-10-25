@@ -125,14 +125,54 @@
         "icon": "$(settings-gear)"
       },
       {
-        "command": "azureDevOpsPR.jumpToLine",
-        "title": "Azure DevOps: Jump to Line",
-        "icon": "$(go-to-file)"
+        "command": "azureDevOpsPR.groupByPeople",
+        "title": "Group by People",
+        "icon": "$(person)"
+      },
+      {
+        "command": "azureDevOpsPR.groupByWorkItems",
+        "title": "Group by Work Items",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "azureDevOpsPR.groupByManual",
+        "title": "Manual Groups",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "azureDevOpsPR.createManualGroup",
+        "title": "Create Group",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "azureDevOpsPR.deleteAllManualGroups",
+        "title": "Delete All Groups",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "azureDevOpsPR.deleteManualGroup",
+        "title": "Delete Group",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "azureDevOpsPR.addToManualGroup",
+        "title": "Add to Group",
+        "icon": "$(add)"
+      },
+      {
+        "command": "azureDevOpsPR.removeFromManualGroup",
+        "title": "Remove from Group",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "azureDevOpsPR.renameManualGroup",
+        "title": "Rename Group",
+        "icon": "$(edit)"
       },
       {
         "command": "azureDevOpsPR.togglePendingMyReview",
         "title": "Toggle Pending My Review",
-        "icon": "$(clock)"
+        "icon": "$(watch)"
       },
       {
         "command": "azureDevOpsPR.toggleReviewedByMe",
@@ -145,14 +185,9 @@
         "icon": "$(bug)"
       },
       {
-        "command": "azureDevOpsPR.groupByPeople",
-        "title": "Group by People",
-        "icon": "$(person)"
-      },
-      {
-        "command": "azureDevOpsPR.groupByWorkItems",
-        "title": "Group by Work Items",
-        "icon": "$(organization)"
+        "command": "azureDevOpsPR.selectWorkItemLevel",
+        "title": "Select Work Item Level",
+        "icon": "$(layers)"
       }
     ],
     "viewsContainers": {
@@ -181,51 +216,103 @@
       ]
     },
     "menus": {
+      "view/title": [
+        {
+          "command": "azureDevOpsPR.groupByPeople",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@0"
+        },
+        {
+          "command": "azureDevOpsPR.groupByWorkItems",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "azureDevOpsPR.groupByManual",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "azureDevOpsPR.createManualGroup",
+          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.manualMode",
+          "group": "navigation@3"
+        },
+        {
+          "command": "azureDevOpsPR.deleteAllManualGroups",
+          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.manualMode",
+          "group": "navigation@4"
+        },
+        {
+          "command": "azureDevOpsPR.selectWorkItemLevel",
+          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.workItemsMode",
+          "group": "navigation@5"
+        },
+        {
+          "command": "azureDevOpsPR.openSettings",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@6"
+        },
+        {
+          "command": "azureDevOpsPR.refreshPRs",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@7"
+        },
+        {
+          "command": "azureDevOpsPR.toggleInlineComments",
+          "when": "view == azureDevOpsPRComments",
+          "group": "navigation@1"
+        },
+        {
+          "command": "azureDevOpsPR.refreshInlineComments",
+          "when": "view == azureDevOpsPRComments",
+          "group": "navigation@2"
+        }
+      ],
       "view/item/context": [
+        {
+          "command": "azureDevOpsPR.createManualGroup",
+          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.manualMode",
+          "group": "0_create@1"
+        },
         {
           "command": "azureDevOpsPR.openPRFromContext",
           "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "navigation@1"
+          "group": "1_pr_actions@1"
         },
         {
           "command": "azureDevOpsPR.viewPRDetails",
           "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "navigation@2"
+          "group": "1_pr_actions@2"
         },
         {
           "command": "azureDevOpsPR.checkout",
           "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "actions@1"
+          "group": "1_pr_actions@3"
         },
         {
           "command": "azureDevOpsPR.approvePR",
           "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "actions@2"
-        },
-        {
-          "command": "azureDevOpsPR.completePR",
-          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "actions@3"
-        },
-        {
-          "command": "azureDevOpsPR.abandonPR",
-          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "actions@4"
+          "group": "2_review@1"
         },
         {
           "command": "azureDevOpsPR.togglePendingMyReview",
           "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "review@1"
+          "group": "3_tracking@1"
         },
         {
           "command": "azureDevOpsPR.toggleReviewedByMe",
           "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "review@2"
+          "group": "3_tracking@2"
+        },
+        {
+          "command": "azureDevOpsPR.addToManualGroup",
+          "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
+          "group": "4_grouping@1"
         },
         {
           "command": "azureDevOpsPR.debugWorkItems",
           "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
-          "group": "debug@1"
+          "group": "9_debug@1"
         },
         {
           "command": "azureDevOpsPR.viewFileWithCommitSelection",
@@ -248,41 +335,29 @@
           "group": "comment@1"
         },
         {
+          "command": "azureDevOpsPR.replyToComment",
+          "when": "view == azureDevOpsPRComments && viewItem == prThread",
+          "group": "comment@1"
+        },
+        {
           "command": "azureDevOpsPR.resolveComment",
           "when": "view == azureDevOpsPRComments && viewItem == prComment",
           "group": "comment@2"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "azureDevOpsPR.groupByPeople",
-          "when": "view == azureDevOpsPRExplorer",
-          "group": "navigation@0"
         },
         {
-          "command": "azureDevOpsPR.groupByWorkItems",
-          "when": "view == azureDevOpsPRExplorer",
-          "group": "navigation@1"
+          "command": "azureDevOpsPR.resolveComment",
+          "when": "view == azureDevOpsPRComments && viewItem == prThread",
+          "group": "comment@2"
         },
         {
-          "command": "azureDevOpsPR.openSettings",
-          "when": "view == azureDevOpsPRExplorer",
-          "group": "navigation@2"
+          "command": "azureDevOpsPR.renameManualGroup",
+          "when": "view == azureDevOpsPRExplorer && viewItem == manualFolder",
+          "group": "1_folder@1"
         },
         {
-          "command": "azureDevOpsPR.refreshPRs",
-          "when": "view == azureDevOpsPRExplorer",
-          "group": "navigation@3"
-        },
-        {
-          "command": "azureDevOpsPR.toggleInlineComments",
-          "when": "view == azureDevOpsPRComments",
-          "group": "navigation@1"
-        },
-        {
-          "command": "azureDevOpsPR.refreshInlineComments",
-          "when": "view == azureDevOpsPRComments",
-          "group": "navigation@2"
+          "command": "azureDevOpsPR.deleteManualGroup",
+          "when": "view == azureDevOpsPRExplorer && viewItem == manualFolder",
+          "group": "1_folder@2"
         }
       ],
       "editor/context": [
@@ -314,60 +389,20 @@
         "azureDevOpsPR.organization": {
           "type": "string",
           "default": "",
-          "description": "Azure DevOps organization URL (e.g., https://dev.azure.com/myorg)"
+          "description": "Azure DevOps organization URL (e.g., https://dev.azure.com/myorg)",
+          "order": 1
         },
         "azureDevOpsPR.project": {
           "type": "string",
           "default": "",
-          "description": "Azure DevOps project name"
+          "description": "Azure DevOps project name",
+          "order": 2
         },
         "azureDevOpsPR.repository": {
           "type": "string",
           "default": "",
           "description": "Repository name (leave empty to auto-detect from git)",
           "order": 3
-        },
-        "azureDevOpsPR.autoRefresh": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically refresh PRs on activation",
-          "order": 5
-        },
-        "azureDevOpsPR.refreshInterval": {
-          "type": "number",
-          "default": 300,
-          "description": "Auto-refresh interval in seconds",
-          "order": 4
-        },
-        "azureDevOpsPR.diffViewer.defaultCommitSelection": {
-          "type": "string",
-          "enum": [
-            "latest",
-            "base",
-            "custom"
-          ],
-          "default": "latest",
-          "description": "Default commit selection for diff viewer"
-        },
-        "azureDevOpsPR.diffViewer.showCommitDropdowns": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show commit selection dropdowns in diff viewer"
-        },
-        "azureDevOpsPR.comments.inlineDisplay": {
-          "type": "boolean",
-          "default": true,
-          "description": "Display PR comments inline in the editor"
-        },
-        "azureDevOpsPR.comments.showResolved": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show resolved comment threads"
-        },
-        "azureDevOpsPR.autoCheckoutBranch": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically checkout the PR branch when opening a PR"
         },
         "azureDevOpsPR.workItemGroupingLevel": {
           "type": "number",
@@ -386,7 +421,73 @@
             "Level 3: Group by 3 levels up from work item",
             "Level 4: Group by 4 levels up from work item"
           ],
-          "description": "Hierarchy level for grouping PRs. 0 = work item itself, 1-4 = levels up in hierarchy. Always shows: [Selected Level] → Person → PR"
+          "description": "Hierarchy level for grouping PRs. 0 = work item itself, 1-4 = levels up in hierarchy. Always shows: [Selected Level] → Person → PR",
+          "order": 11
+        },
+        "azureDevOpsPR.debugWorkItemHierarchy": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose logging for work item hierarchy operations and debugging",
+          "order": 12
+        },
+        "azureDevOpsPR.debugWorkItemDisplay": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable detailed logging when displaying work items under PRs (useful for troubleshooting work item visibility issues)",
+          "order": 13
+        },
+        "azureDevOpsPR.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh PRs on activation",
+          "order": 21
+        },
+        "azureDevOpsPR.refreshInterval": {
+          "type": "number",
+          "default": 300,
+          "description": "Auto-refresh interval in seconds",
+          "order": 22
+        },
+        "azureDevOpsPR.diffViewer.defaultCommitSelection": {
+          "type": "string",
+          "enum": [
+            "latest",
+            "base",
+            "custom"
+          ],
+          "default": "latest",
+          "description": "Default commit selection for diff viewer",
+          "order": 31
+        },
+        "azureDevOpsPR.diffViewer.showCommitDropdowns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show commit selection dropdowns in diff viewer",
+          "order": 32
+        },
+        "azureDevOpsPR.comments.inlineDisplay": {
+          "type": "boolean",
+          "default": true,
+          "description": "Display PR comments inline in the editor",
+          "order": 41
+        },
+        "azureDevOpsPR.comments.showResolved": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show resolved comment threads",
+          "order": 42
+        },
+        "azureDevOpsPR.autoCheckoutBranch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically checkout the PR branch when opening a PR",
+          "order": 51
+        },
+        "azureDevOpsPR.enableAICommentEnhancement": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered comment enhancement with GitHub Copilot (requires GitHub Copilot extension)",
+          "order": 52
         }
       }
     }

@@ -1,6 +1,7 @@
 import * as azdev from 'azure-devops-node-api';
 import * as vscode from 'vscode';
 import { IGitApi } from 'azure-devops-node-api/GitApi.js';
+import { WorkItemExpand } from 'azure-devops-node-api/interfaces/WorkItemTrackingInterfaces.js';
 import { 
     PullRequest, 
     PRFile, 
@@ -373,6 +374,94 @@ export class AzureDevOpsService {
         );
     }
 
+    async getCommentThread(pullRequestId: number, threadId: number): Promise<any> {
+        await this.ensureInitialized();
+
+        if (!this.config.repository) {
+            throw new Error('Repository not configured. Please set azureDevOpsPR.repository in settings.');
+        }
+
+        try {
+            // Get all threads and find the one we need
+            const threads = await this.gitApi!.getThreads(
+                this.config.repository,
+                pullRequestId,
+                this.config.project
+            );
+
+            const thread = threads.find((t: any) => t.id === threadId);
+            
+            if (!thread) {
+                throw new Error(`Thread ${threadId} not found`);
+            }
+
+            return {
+                id: thread.id,
+                comments: thread.comments?.map((comment: any) => ({
+                    id: comment.id,
+                    content: comment.content,
+                    author: {
+                        id: comment.author?.id,
+                        displayName: comment.author?.displayName,
+                        uniqueName: comment.author?.uniqueName
+                    },
+                    publishedDate: comment.publishedDate,
+                    isDeleted: comment.isDeleted || false
+                })) || [],
+                status: thread.status,
+                threadContext: thread.threadContext
+            };
+        } catch (error) {
+            console.error(`Failed to get thread ${threadId}:`, error);
+            throw error;
+        }
+    }
+
+    async getCurrentUser(): Promise<any> {
+        await this.ensureInitialized();
+
+        try {
+            // Get the authorized user from connection data
+            const coreApi = await this.connection!.getCoreApi();
+            const teamContext: any = { project: this.config.project };
+            
+            // Get current user from team members
+            try {
+                const members = await coreApi.getTeamMembersWithExtendedProperties(
+                    this.config.project,
+                    this.config.project
+                );
+                
+                if (members && members.length > 0) {
+                    // The first member with 'me' identity is typically the current user
+                    const currentUser = members[0].identity;
+                    return {
+                        id: currentUser?.id,
+                        displayName: currentUser?.displayName,
+                        uniqueName: currentUser?.uniqueName
+                    };
+                }
+            } catch {
+                // Fallback: just return a basic identity
+                return {
+                    id: 'me',
+                    displayName: 'Current User',
+                    uniqueName: 'me'
+                };
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('Failed to get current user:', error);
+            // Return a fallback
+            return {
+                id: 'me',
+                displayName: 'Current User',
+                uniqueName: 'me'
+            };
+        }
+    }
+
     async resolveThread(pullRequestId: number, threadId: number): Promise<void> {
         await this.ensureInitialized();
 
@@ -495,28 +584,37 @@ export class AzureDevOpsService {
         await this.ensureInitialized();
 
         try {
+            const config = vscode.workspace.getConfiguration('azureDevOpsPR');
+            const debugEnabled = config.get<boolean>('debugWorkItemHierarchy', false);
+            
             const workItemTrackingApi = await this.connection!.getWorkItemTrackingApi();
             const workItem = await workItemTrackingApi.getWorkItem(
                 workItemId,
+                undefined,  // Cannot specify fields when using expand parameter
                 undefined,
-                undefined,
-                undefined,
+                WorkItemExpand.Relations,  // Expand relations to get parent links
                 this.config.project
             );
 
+            if (debugEnabled) {
+                console.log(`[WorkItemDetails] WI #${workItemId} raw relations:`, JSON.stringify(workItem.relations, null, 2));
+            }
+
             // Find parent relationship
             const parentRelation = workItem.relations?.find((r: any) => r.rel === 'System.LinkTypes.Hierarchy-Reverse');
-            let parentId = undefined;
+            let parentId: number | undefined = undefined;
             
             if (parentRelation && parentRelation.url) {
                 // Extract work item ID from URL (e.g., "https://dev.azure.com/org/project/_apis/wit/workItems/12345")
                 const match = parentRelation.url.match(/workItems\/(\d+)$/);
                 if (match) {
-                    parentId = match[1];
+                    parentId = parseInt(match[1], 10);
                 }
             }
 
-            console.log(`[WorkItemDetails] WI #${workItemId}: ${workItem.fields?.['System.Title']} (Type: ${workItem.fields?.['System.WorkItemType']}, Parent: ${parentId || 'none'})`);
+            if (debugEnabled) {
+                console.log(`[WorkItemDetails] WI #${workItemId}: ${workItem.fields?.['System.Title']} (Type: ${workItem.fields?.['System.WorkItemType']}, Parent: ${parentId || 'none'})`);
+            }
 
             return {
                 id: workItem.id,
@@ -554,15 +652,25 @@ export class AzureDevOpsService {
         await this.ensureInitialized();
 
         try {
-            console.log(`[WorkItemAtLevel] Starting traversal from WI #${workItemId} to level ${level}`);
+            const config = vscode.workspace.getConfiguration('azureDevOpsPR');
+            const debugEnabled = config.get<boolean>('debugWorkItemHierarchy', false);
+            
+            if (debugEnabled) {
+                console.log(`[WorkItemAtLevel] Starting traversal from WI #${workItemId} to level ${level}`);
+            }
+            
             let currentWorkItem = await this.getWorkItemDetails(workItemId);
             
             if (!currentWorkItem) {
-                console.log(`[WorkItemAtLevel] Failed to get initial work item #${workItemId}`);
+                if (debugEnabled) {
+                    console.log(`[WorkItemAtLevel] Failed to get initial work item #${workItemId}`);
+                }
                 return null;
             }
 
-            console.log(`[WorkItemAtLevel] Level 0: WI #${currentWorkItem.id} - ${currentWorkItem.title}`);
+            if (debugEnabled) {
+                console.log(`[WorkItemAtLevel] Level 0: WI #${currentWorkItem.id} - ${currentWorkItem.title}`);
+            }
 
             // If level is 0, return the work item itself
             if (level === 0) {
@@ -573,25 +681,35 @@ export class AzureDevOpsService {
             for (let i = 0; i < level; i++) {
                 if (!currentWorkItem.parentId) {
                     // No more parents, return the highest we can get
-                    console.log(`[WorkItemAtLevel] Reached top of hierarchy at level ${i} for work item ${workItemId}, returning WI #${currentWorkItem.id}`);
+                    if (debugEnabled) {
+                        console.log(`[WorkItemAtLevel] Reached top of hierarchy at level ${i} for work item ${workItemId}, returning WI #${currentWorkItem.id}`);
+                    }
                     return currentWorkItem;
                 }
                 
-                const parentId = parseInt(currentWorkItem.parentId);
-                console.log(`[WorkItemAtLevel] Level ${i + 1}: Moving to parent WI #${parentId}`);
-                const parent = await this.getWorkItemDetails(parentId);
+                if (debugEnabled) {
+                    console.log(`[WorkItemAtLevel] Level ${i + 1}: Moving to parent WI #${currentWorkItem.parentId}`);
+                }
+                
+                const parent = await this.getWorkItemDetails(currentWorkItem.parentId);
                 
                 if (!parent) {
                     // Failed to get parent, return what we have
-                    console.log(`[WorkItemAtLevel] Failed to get parent WI #${parentId} at level ${i + 1}, returning WI #${currentWorkItem.id}`);
+                    if (debugEnabled) {
+                        console.log(`[WorkItemAtLevel] Failed to get parent WI #${currentWorkItem.parentId} at level ${i + 1}, returning WI #${currentWorkItem.id}`);
+                    }
                     return currentWorkItem;
                 }
                 
-                console.log(`[WorkItemAtLevel] Level ${i + 1}: Got parent WI #${parent.id} - ${parent.title}`);
+                if (debugEnabled) {
+                    console.log(`[WorkItemAtLevel] Level ${i + 1}: Got parent WI #${parent.id} - ${parent.title}`);
+                }
                 currentWorkItem = parent;
             }
 
-            console.log(`[WorkItemAtLevel] Final result at level ${level}: WI #${currentWorkItem.id} - ${currentWorkItem.title}`);
+            if (debugEnabled) {
+                console.log(`[WorkItemAtLevel] Final result at level ${level}: WI #${currentWorkItem.id} - ${currentWorkItem.title}`);
+            }
             return currentWorkItem;
         } catch (error) {
             console.error(`Failed to get work item at level ${level} for work item ${workItemId}:`, error);

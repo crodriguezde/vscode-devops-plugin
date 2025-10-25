@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { AzureDevOpsService } from './services/azureDevOpsService';
-import { PRTreeDataProvider } from './providers/prTreeDataProvider';
+import { PRTreeDataProvider, PRTreeItem } from './providers/prTreeDataProvider';
 import { PRFilesTreeDataProvider } from './providers/prFilesTreeDataProvider';
 import { PRCommentsTreeDataProvider } from './providers/prCommentsTreeDataProvider';
 import { PRWebviewProvider } from './providers/prWebviewProvider';
@@ -10,8 +10,10 @@ import { InlineCommentProvider } from './providers/inlineCommentProvider';
 import { CommentCodeLensProvider } from './providers/commentCodeLensProvider';
 import { SettingsWebviewProvider } from './providers/settingsWebviewProvider';
 import { DiffService } from './services/diffService';
+import { CommentChatWebviewProvider } from './providers/commentChatWebviewProvider';
 
 let azureDevOpsService: AzureDevOpsService;
+let commentChatProvider: CommentChatWebviewProvider;
 let settingsWebviewProvider: SettingsWebviewProvider;
 let authProvider: AzureCliAuthProvider;
 let prTreeDataProvider: PRTreeDataProvider;
@@ -21,8 +23,10 @@ let enhancedDiffProvider: EnhancedDiffProvider;
 let inlineCommentProvider: InlineCommentProvider;
 let commentCodeLensProvider: CommentCodeLensProvider;
 let diffService: DiffService;
+let extensionContext: vscode.ExtensionContext;
 
 export function activate(context: vscode.ExtensionContext) {
+    extensionContext = context;
     console.log('Azure DevOps PR Viewer is now active');
 
     // Initialize services with Azure CLI authentication
@@ -32,44 +36,190 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize enhanced diff provider
     enhancedDiffProvider = new EnhancedDiffProvider(azureDevOpsService);
     
-    // Initialize inline comment provider
+    // Initialize inline comment provider (disabled by default)
     inlineCommentProvider = new InlineCommentProvider(azureDevOpsService);
     context.subscriptions.push(inlineCommentProvider);
     
-    // Initialize comment code lens provider
+    // Comment code lens provider is available but not registered by default
+    // Users can enable it via settings if they prefer the old inline comment experience
     commentCodeLensProvider = new CommentCodeLensProvider(inlineCommentProvider);
-    context.subscriptions.push(
-        vscode.languages.registerCodeLensProvider(
-            { scheme: 'file' },
-            commentCodeLensProvider
-        )
-    );
     
     // Initialize tree data providers
     prTreeDataProvider = new PRTreeDataProvider(azureDevOpsService, context);
     prFilesTreeDataProvider = new PRFilesTreeDataProvider(azureDevOpsService);
     prCommentsTreeDataProvider = new PRCommentsTreeDataProvider(azureDevOpsService);
 
+    // Initialize context for manual mode and work items mode button visibility
+    vscode.commands.executeCommand('setContext', 'azureDevOpsPR.manualMode', false);
+    vscode.commands.executeCommand('setContext', 'azureDevOpsPR.workItemsMode', false);
+    
+    // Initialize current level context
+    prTreeDataProvider.updateLevelContext();
+
     // Initialize settings webview provider
     settingsWebviewProvider = new SettingsWebviewProvider(context);
+
+    // Initialize comment chat webview provider
+    commentChatProvider = new CommentChatWebviewProvider(context);
 
     // Initialize diff service
     diffService = new DiffService(azureDevOpsService);
 
-    // Register tree views
+    // Register tree views with drag and drop support
     const prTreeView = vscode.window.createTreeView('azureDevOpsPRExplorer', {
         treeDataProvider: prTreeDataProvider,
         showCollapseAll: true,
-        canSelectMany: false
+        canSelectMany: false,
+        dragAndDropController: prTreeDataProvider.dragAndDropController
     });
+    
+    // Register PR Files tree view
+    const prFilesTreeView = vscode.window.createTreeView('azureDevOpsPRFiles', {
+        treeDataProvider: prFilesTreeDataProvider,
+        showCollapseAll: true
+    });
+    
+    // Register PR Comments tree view
+    const prCommentsTreeView = vscode.window.createTreeView('azureDevOpsPRComments', {
+        treeDataProvider: prCommentsTreeDataProvider,
+        showCollapseAll: true
+    });
+    
+    // Add tree views to subscriptions
+    context.subscriptions.push(prTreeView, prFilesTreeView, prCommentsTreeView);
     
     // Note: Checkboxes are not used in this implementation
     // We use visual indicators (⏳ and ✓) in the description instead
     
     context.subscriptions.push(
-        prTreeView,
-        vscode.window.registerTreeDataProvider('azureDevOpsPRFiles', prFilesTreeDataProvider),
-        vscode.window.registerTreeDataProvider('azureDevOpsPRComments', prCommentsTreeDataProvider)
+        vscode.commands.registerCommand('azureDevOpsPR.groupByWorkItems', async () => {
+            await prTreeDataProvider.setGroupingMode('workitems');
+        })
+    );
+
+    // Manual Grouping Commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('azureDevOpsPR.groupByManual', async () => {
+            await prTreeDataProvider.setGroupingMode('manual');
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('azureDevOpsPR.createManualGroup', async () => {
+            const name = await vscode.window.showInputBox({
+                prompt: 'Enter group name',
+                placeHolder: 'My Group',
+                validateInput: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return 'Group name cannot be empty';
+                    }
+                    return null;
+                }
+            });
+            if (name) {
+                await prTreeDataProvider.createManualGroup(name.trim());
+                vscode.window.showInformationMessage(`Created group: ${name}`);
+            }
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.deleteAllManualGroups', async () => {
+            const groups = prTreeDataProvider.getManualGroups();
+            if (groups.length === 0) {
+                vscode.window.showInformationMessage('No groups to delete');
+                return;
+            }
+
+            const totalPRs = groups.reduce((sum, g) => sum + g.prIds.length, 0);
+            const confirm = await vscode.window.showWarningMessage(
+                `Delete all ${groups.length} group(s)?\n\nThis will unassign ${totalPRs} PR(s). This action cannot be undone.`,
+                { modal: true },
+                'Delete All', 'Cancel'
+            );
+            
+            if (confirm === 'Delete All') {
+                await prTreeDataProvider.deleteAllManualGroups();
+                vscode.window.showInformationMessage(`Deleted ${groups.length} group(s), unassigned ${totalPRs} PR(s)`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('azureDevOpsPR.deleteManualGroup', async (item: PRTreeItem) => {
+            if (item.manualGroupId) {
+                const confirm = await vscode.window.showWarningMessage(
+                    `Delete group "${item.label}"?`,
+                    { modal: true },
+                    'Delete', 'Cancel'
+                );
+                if (confirm === 'Delete') {
+                    await prTreeDataProvider.deleteManualGroup(item.manualGroupId);
+                    vscode.window.showInformationMessage('Group deleted');
+                }
+            }
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.renameManualGroup', async (item: PRTreeItem) => {
+            if (item.manualGroupId) {
+                const currentName = item.label?.toString().replace(/\s*\(\d+\)$/, '') || '';
+                const newName = await vscode.window.showInputBox({
+                    prompt: 'Enter new group name',
+                    value: currentName,
+                    validateInput: (value) => {
+                        if (!value || value.trim().length === 0) {
+                            return 'Group name cannot be empty';
+                        }
+                        return null;
+                    }
+                });
+                if (newName && newName !== currentName) {
+                    await prTreeDataProvider.renameManualGroup(item.manualGroupId, newName.trim());
+                    vscode.window.showInformationMessage(`Group renamed to: ${newName}`);
+                }
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('azureDevOpsPR.addToManualGroup', async (item: PRTreeItem) => {
+            if (item.pr) {
+                const groups = prTreeDataProvider.getManualGroups();
+                
+                if (groups.length === 0) {
+                    const create = await vscode.window.showInformationMessage(
+                        'No manual groups exist. Create one?',
+                        'Create Group', 'Cancel'
+                    );
+                    if (create === 'Create Group') {
+                        await vscode.commands.executeCommand('azureDevOpsPR.createManualGroup');
+                    }
+                    return;
+                }
+                
+                const items = groups.map(g => ({ 
+                    label: g.name,
+                    description: `${g.prIds.length} PRs`,
+                    group: g 
+                }));
+                
+                const selected = await vscode.window.showQuickPick(items, {
+                    placeHolder: 'Select group to add PR to'
+                });
+                
+                if (selected) {
+                    await prTreeDataProvider.addPRToManualGroup(item.pr.pullRequestId, selected.group.id);
+                    vscode.window.showInformationMessage(`Added PR #${item.pr.pullRequestId} to ${selected.label}`);
+                }
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('azureDevOpsPR.removeFromManualGroup', async (item: PRTreeItem) => {
+            if (item.pr && item.manualGroupId) {
+                await prTreeDataProvider.removePRFromManualGroup(item.pr.pullRequestId, item.manualGroupId);
+                vscode.window.showInformationMessage(`Removed PR from group`);
+            }
+        })
     );
 
     // Register commands
@@ -245,8 +395,53 @@ export function activate(context: vscode.ExtensionContext) {
             await prTreeDataProvider.setGroupingMode('people');
         }),
 
-        vscode.commands.registerCommand('azureDevOpsPR.groupByWorkItems', async () => {
-            await prTreeDataProvider.setGroupingMode('workitems');
+        vscode.commands.registerCommand('azureDevOpsPR.jumpToCommentInDiff', async (args) => {
+            await jumpToCommentInDiff(args);
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.selectWorkItemLevel', async () => {
+            const currentLevel = prTreeDataProvider.getCurrentWorkItemLevel();
+            
+            const levelOptions = [
+                {
+                    label: '$(circle-outline) Level 0',
+                    description: 'Group by directly linked work item',
+                    level: 0
+                },
+                {
+                    label: '$(circle-outline) Level 1',
+                    description: 'Group by parent of work item (1 level up)',
+                    level: 1
+                },
+                {
+                    label: '$(circle-outline) Level 2',
+                    description: 'Group by grandparent (2 levels up)',
+                    level: 2
+                },
+                {
+                    label: '$(circle-outline) Level 3',
+                    description: 'Group by great-grandparent (3 levels up)',
+                    level: 3
+                },
+                {
+                    label: '$(circle-outline) Level 4',
+                    description: 'Group by 4 levels up from work item',
+                    level: 4
+                }
+            ];
+            
+            // Mark the current level with a filled circle
+            levelOptions[currentLevel].label = `$(circle-filled) Level ${currentLevel} (Current)`;
+            
+            const selected = await vscode.window.showQuickPick(levelOptions, {
+                placeHolder: `Select work item grouping level (Current: Level ${currentLevel})`,
+                title: 'Work Item Grouping Level'
+            });
+            
+            if (selected && selected.level !== currentLevel) {
+                await prTreeDataProvider.setWorkItemLevel(selected.level);
+                vscode.window.showInformationMessage(`✓ Work item grouping set to Level ${selected.level}`);
+            }
         })
     );
 
@@ -460,22 +655,19 @@ async function addComment(fileItem: any) {
     }
 
     try {
-        const comment = await vscode.window.showInputBox({
-            prompt: 'Enter your comment',
-            placeHolder: 'Type your comment here...',
-            ignoreFocusOut: true
-        });
-
-        if (comment) {
-            await azureDevOpsService.addComment(
-                fileItem.pr.pullRequestId,
-                comment,
-                fileItem.file.path
-            );
-            
-            await prCommentsTreeDataProvider.refresh();
-            vscode.window.showInformationMessage('Comment added successfully');
-        }
+        const fileName = fileItem.file.path.split('/').pop() || 'File';
+        await commentChatProvider.showForNewComment(
+            `Add Comment - ${fileName}`,
+            async (comment: string) => {
+                await azureDevOpsService.addComment(
+                    fileItem.pr.pullRequestId,
+                    comment,
+                    fileItem.file.path
+                );
+                await prCommentsTreeDataProvider.refresh();
+                vscode.window.showInformationMessage('Comment added successfully');
+            }
+        );
     } catch (error) {
         vscode.window.showErrorMessage(`Failed to add comment: ${error}`);
     }
@@ -586,29 +778,49 @@ async function viewFileWithCommitSelection(context: vscode.ExtensionContext, fil
 }
 
 async function replyToComment(commentItem: any) {
-    if (!commentItem || !commentItem.comment) {
+    if (!commentItem || !commentItem.thread) {
+        vscode.window.showErrorMessage('Invalid comment item - no thread data');
         return;
     }
 
     try {
-        const reply = await vscode.window.showInputBox({
-            prompt: 'Enter your reply',
-            placeHolder: 'Type your reply here...',
-            ignoreFocusOut: true
-        });
-
-        if (reply) {
-            await azureDevOpsService.addCommentToThread(
-                commentItem.pr.pullRequestId,
-                commentItem.comment.threadId,
-                reply
-            );
-            
-            await prCommentsTreeDataProvider.refresh();
-            vscode.window.showInformationMessage('Reply added successfully');
+        const thread = commentItem.thread;
+        const threadId = thread.id;
+        
+        if (!threadId) {
+            vscode.window.showErrorMessage('Thread ID not found');
+            return;
         }
+
+        // Get current user info
+        const currentUser = await azureDevOpsService.getCurrentUser();
+        const currentUserId = currentUser?.id || '';
+
+        // Format comments for chat interface
+        const comments = thread.comments.map((c: any) => ({
+            author: c.author?.displayName || 'Unknown',
+            content: c.content || '',
+            date: new Date(c.publishedDate || Date.now()),
+            isCurrentUser: c.author?.id === currentUserId
+        }));
+
+        // Show chat interface
+        const fileName = thread.threadContext?.filePath?.split('/').pop() || 'Comment';
+        await commentChatProvider.show(
+            comments,
+            `${fileName} - Comment Thread`,
+            async (reply: string) => {
+                await azureDevOpsService.addCommentToThread(
+                    commentItem.pr.pullRequestId,
+                    threadId,
+                    reply
+                );
+                await prCommentsTreeDataProvider.refresh();
+            }
+        );
     } catch (error) {
-        vscode.window.showErrorMessage(`Failed to reply to comment: ${error}`);
+        vscode.window.showErrorMessage(`Failed to open comment chat: ${error}`);
+        console.error('Reply to comment error:', error);
     }
 }
 
@@ -681,39 +893,32 @@ async function addCommentAtLine() {
     const selectedText = editor.document.getText(selection);
     const hasSelection = !selection.isEmpty && selectedText.trim().length > 0;
     
-    // Build prompt with context
-    let prompt = 'Enter your comment';
-    let placeholder = 'Type your comment here...';
+    // Build title with context
+    const filePath = getRelativeFilePath(editor.document.uri);
+    const fileName = filePath.split('/').pop() || 'File';
+    const lineRange = startLine === endLine 
+        ? `Line ${startLine}` 
+        : `Lines ${startLine}-${endLine}`;
     
-    if (hasSelection) {
-        const lineRange = startLine === endLine 
-            ? `line ${startLine}` 
-            : `lines ${startLine}-${endLine}`;
-        prompt = `Comment on ${lineRange}`;
-        placeholder = `Comment about: "${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}"`;
-    }
+    const title = hasSelection 
+        ? `${fileName} - ${lineRange}\n"${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}"`
+        : `${fileName} - ${lineRange}`;
 
-    const comment = await vscode.window.showInputBox({
-        prompt,
-        placeHolder: placeholder,
-        ignoreFocusOut: true,
-        value: hasSelection ? `Re: "${selectedText.trim()}"\n\n` : undefined
-    });
-
-    if (comment) {
-        try {
-            const filePath = getRelativeFilePath(editor.document.uri);
-            // Use start line for the comment position
-            await inlineCommentProvider.addCommentAtLine(filePath, startLine, comment);
-            commentCodeLensProvider.refresh();
-            
-            const lineInfo = startLine === endLine 
-                ? `line ${startLine}` 
-                : `lines ${startLine}-${endLine}`;
-            vscode.window.showInformationMessage(`Comment added at ${lineInfo}`);
-        } catch (error) {
-            vscode.window.showErrorMessage(`Failed to add comment: ${error}`);
-        }
+    try {
+        await commentChatProvider.showForNewComment(
+            title,
+            async (comment: string) => {
+                await inlineCommentProvider.addCommentAtLine(filePath, startLine, comment);
+                commentCodeLensProvider.refresh();
+                
+                const lineInfo = startLine === endLine 
+                    ? `line ${startLine}` 
+                    : `lines ${startLine}-${endLine}`;
+                vscode.window.showInformationMessage(`Comment added at ${lineInfo}`);
+            }
+        );
+    } catch (error) {
+        vscode.window.showErrorMessage(`Failed to add comment: ${error}`);
     }
 }
 
@@ -789,6 +994,125 @@ function getRelativeFilePath(uri: vscode.Uri): string {
             .replace(/\\/g, '/');
     }
     return uri.fsPath.replace(/\\/g, '/');
+}
+
+async function jumpToCommentInDiff(args: any) {
+    if (!args || !args.pr || !args.filePath) {
+        vscode.window.showWarningMessage('Invalid comment location');
+        return;
+    }
+
+    try {
+        // Get Git extension
+        const gitExtension = vscode.extensions.getExtension('vscode.git');
+        if (!gitExtension) {
+            vscode.window.showErrorMessage('Git extension not available');
+            return;
+        }
+
+        const git = gitExtension.exports.getAPI(1);
+        const repo = git.repositories[0];
+        
+        if (!repo) {
+            vscode.window.showErrorMessage('No git repository found');
+            return;
+        }
+
+        // Get the current branch (should be the PR source branch)
+        const currentBranch = repo.state.HEAD?.name;
+        const sourceBranch = args.pr.sourceRefName.replace('refs/heads/', '');
+        
+        // Check if we're on the PR branch
+        if (currentBranch !== sourceBranch) {
+            const switchBranch = await vscode.window.showWarningMessage(
+                `You're on branch '${currentBranch}', but the comment is on '${sourceBranch}'. Switch to PR branch?`,
+                'Switch Branch', 'Cancel'
+            );
+            
+            if (switchBranch === 'Switch Branch') {
+                try {
+                    await repo.checkout(sourceBranch);
+                    vscode.window.showInformationMessage(`Switched to branch '${sourceBranch}'`);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to switch branch: ${error}`);
+                    return;
+                }
+            } else {
+                // User cancelled - this is normal, not an error
+                return;
+            }
+        }
+
+        // Normalize file path
+        const gitRoot = repo.rootUri;
+        let normalizedPath = args.filePath.startsWith('/') 
+            ? args.filePath.substring(1) 
+            : args.filePath;
+        
+        // Remove repo name if present in path
+        const gitRootName = gitRoot.path.split('/').pop();
+        if (gitRootName && normalizedPath.startsWith(gitRootName + '/')) {
+            normalizedPath = normalizedPath.substring(gitRootName.length + 1);
+        }
+        
+        // Construct the file URI
+        const fileUri = vscode.Uri.joinPath(gitRoot, normalizedPath);
+        
+        // Check if file exists
+        try {
+            await vscode.workspace.fs.stat(fileUri);
+        } catch {
+            vscode.window.showErrorMessage(`File not found: ${normalizedPath}`);
+            return;
+        }
+        
+        // Open the file
+        const document = await vscode.workspace.openTextDocument(fileUri);
+        const editor = await vscode.window.showTextDocument(document);
+        
+        // Jump to the line
+        if (args.lineNumber) {
+            const position = new vscode.Position(args.lineNumber - 1, 0);
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(
+                new vscode.Range(position, position),
+                vscode.TextEditorRevealType.InCenter
+            );
+        }
+
+        // If there's a thread, open the comment chat
+        if (args.thread) {
+            const thread = args.thread;
+            const currentUser = await azureDevOpsService.getCurrentUser();
+            const currentUserId = currentUser?.id || '';
+
+            // Format comments for chat interface
+            const comments = thread.comments.map((c: any) => ({
+                author: c.author?.displayName || 'Unknown',
+                content: c.content || '',
+                date: new Date(c.publishedDate || Date.now()),
+                isCurrentUser: c.author?.id === currentUserId
+            }));
+
+            // Show chat interface
+            const fileName = normalizedPath.split('/').pop() || 'Comment';
+            await commentChatProvider.show(
+                comments,
+                `${fileName} - Line ${args.lineNumber}`,
+                async (reply: string) => {
+                    await azureDevOpsService.addCommentToThread(
+                        args.pr.pullRequestId,
+                        thread.id,
+                        reply
+                    );
+                    await prCommentsTreeDataProvider.refresh();
+                }
+            );
+        }
+    } catch (error) {
+        console.error('Failed to jump to comment:', error);
+        vscode.window.showErrorMessage(`Failed to open file: ${error}`);
+    }
 }
 
 async function viewFileCommitDiff(commitItem: any) {
