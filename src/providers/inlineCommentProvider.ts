@@ -11,7 +11,7 @@ export class InlineCommentProvider implements vscode.Disposable {
     private currentPR: PullRequest | null = null;
 
     constructor(private azureDevOpsService: AzureDevOpsService) {
-        // Create decoration type for comment indicators
+        // Create decoration type for comment indicators with click support
         this.decorationType = vscode.window.createTextEditorDecorationType({
             gutterIconPath: vscode.Uri.parse('data:image/svg+xml,' + encodeURIComponent(`
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
@@ -23,7 +23,8 @@ export class InlineCommentProvider implements vscode.Disposable {
             overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.commentForeground'),
             overviewRulerLane: vscode.OverviewRulerLane.Right,
             isWholeLine: true,
-            backgroundColor: new vscode.ThemeColor('editor.lineHighlightBackground')
+            backgroundColor: new vscode.ThemeColor('editor.lineHighlightBackground'),
+            cursor: 'pointer'
         });
 
         // Register event listeners
@@ -38,8 +39,35 @@ export class InlineCommentProvider implements vscode.Disposable {
                 if (editor && event.document === editor.document) {
                     this.updateDecorations(editor);
                 }
+            }),
+            vscode.window.onDidChangeTextEditorSelection(event => {
+                // Handle click on comment decoration
+                this.handleSelection(event);
             })
         );
+    }
+
+    private async handleSelection(event: vscode.TextEditorSelectionChangeEvent): Promise<void> {
+        const editor = event.textEditor;
+        const selection = event.selections[0];
+        
+        if (!selection || !selection.isEmpty) {
+            return; // Only handle single cursor clicks
+        }
+        
+        const line = selection.active.line + 1; // Convert to 1-based
+        const documentPath = this.getRelativeFilePath(editor.document.uri);
+        const thread = this.getThreadAtLine(documentPath, line);
+        
+        if (thread && this.currentPR) {
+            // Found a comment thread at this line - open Comment Chat
+            await vscode.commands.executeCommand('azureDevOpsPR.openCommentChat', {
+                pr: this.currentPR,
+                thread: thread,
+                filePath: documentPath,
+                lineNumber: line
+            });
+        }
     }
 
     public async loadCommentsForPR(pr: PullRequest): Promise<void> {
@@ -231,32 +259,9 @@ export class InlineCommentProvider implements vscode.Disposable {
         return this.normalizeFilePath(uri.fsPath.replace(/\\/g, '/'));
     }
 
-    private createHoverMessage(thread: CommentThread): vscode.MarkdownString {
-        const md = new vscode.MarkdownString();
-        md.supportHtml = true;
-        md.isTrusted = true;
-
-        md.appendMarkdown(`### 💬 Comment Thread ${thread.isResolved ? '✓ Resolved' : ''}\n\n`);
-        
-        thread.comments.forEach((comment, index) => {
-            if (index > 0) {
-                md.appendMarkdown('---\n\n');
-            }
-            
-            md.appendMarkdown(`**${comment.author.displayName}** `);
-            md.appendMarkdown(`*${new Date(comment.publishedDate).toLocaleString()}*\n\n`);
-            md.appendMarkdown(`${comment.content}\n\n`);
-        });
-
-        // Add action links
-        md.appendMarkdown(`[Reply](command:azureDevOpsPR.replyToCommentInline?${encodeURIComponent(JSON.stringify({ threadId: thread.id, filePath: thread.filePath }))})`);
-        
-        if (!thread.isResolved) {
-            md.appendMarkdown(` | `);
-            md.appendMarkdown(`[Resolve](command:azureDevOpsPR.resolveCommentInline?${encodeURIComponent(JSON.stringify({ threadId: thread.id }))})`);
-        }
-
-        return md;
+    private createHoverMessage(thread: CommentThread): vscode.MarkdownString | undefined {
+        // No hover message - users should click to open Comment Chat panel
+        return undefined;
     }
 
     public async showCommentsInEditor(document: vscode.TextDocument): Promise<void> {
@@ -311,6 +316,34 @@ export class InlineCommentProvider implements vscode.Disposable {
         await this.loadCommentsForPR(this.currentPR);
     }
 
+    public async addCommentAtLineRange(filePath: string, startLine: number, endLine: number, content: string): Promise<void> {
+        if (!this.currentPR) {
+            throw new Error('No PR loaded');
+        }
+
+        // Use the range-aware API method if available, otherwise fall back to single line
+        if (startLine === endLine) {
+            await this.azureDevOpsService.addInlineComment(
+                this.currentPR.pullRequestId,
+                content,
+                filePath,
+                startLine
+            );
+        } else {
+            // For multi-line comments, use the range-aware method
+            await this.azureDevOpsService.addInlineCommentRange(
+                this.currentPR.pullRequestId,
+                content,
+                filePath,
+                startLine,
+                endLine
+            );
+        }
+
+        // Reload comments
+        await this.loadCommentsForPR(this.currentPR);
+    }
+
     public getThreadAtLine(filePath: string, lineNumber: number): CommentThread | undefined {
         const threads = this.commentThreads.get(filePath) || [];
         return threads.find(thread => 
@@ -318,9 +351,9 @@ export class InlineCommentProvider implements vscode.Disposable {
         );
     }
 
-    public refreshComments(): void {
+    public async refreshComments(): Promise<void> {
         if (this.currentPR) {
-            this.loadCommentsForPR(this.currentPR);
+            await this.loadCommentsForPR(this.currentPR);
         }
     }
 

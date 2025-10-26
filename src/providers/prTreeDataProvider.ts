@@ -132,6 +132,22 @@ export class PRTreeDataProvider implements vscode.TreeDataProvider<PRTreeItem> {
         return this.reviewedByMePRs.has(prId);
     }
 
+    clearAllToggles(): number {
+        const totalCleared = this.pendingMyReviewPRs.size + this.reviewedByMePRs.size;
+        
+        this.pendingMyReviewPRs.clear();
+        this.reviewedByMePRs.clear();
+        
+        // Save to workspace state
+        if (this.context) {
+            this.context.workspaceState.update('pendingMyReviewPRs', []);
+            this.context.workspaceState.update('reviewedByMePRs', []);
+        }
+        
+        this._onDidChangeTreeData.fire();
+        return totalCleared;
+    }
+
     getGroupingMode(): GroupingMode {
         return this.groupingMode;
     }
@@ -146,15 +162,15 @@ export class PRTreeDataProvider implements vscode.TreeDataProvider<PRTreeItem> {
         }
 
         if (mode === 'workitems' && !this.workItemsReady) {
-            vscode.window.showInformationMessage('Work items are still loading. Please wait...');
+            vscode.window.showInformationMessage('Work items are still loading. Showing People view...');
+            // Fall back to people mode and update context
+            this.groupingMode = 'people';
+            vscode.commands.executeCommand('setContext', 'azureDevOpsPR.mode', 'people');
+            this._onDidChangeTreeData.fire();
             return;
         }
 
         this.groupingMode = mode;
-        
-        // Update context for conditional button visibility
-        vscode.commands.executeCommand('setContext', 'azureDevOpsPR.manualMode', mode === 'manual');
-        vscode.commands.executeCommand('setContext', 'azureDevOpsPR.workItemsMode', mode === 'workitems');
         
         this._onDidChangeTreeData.fire();
         

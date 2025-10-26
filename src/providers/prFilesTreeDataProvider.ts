@@ -9,6 +9,7 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
     private currentPR?: PullRequest;
     private files: PRFile[] = [];
     private commentCounts: Map<string, number> = new Map();
+    private generalComments: any[] = [];
 
     constructor(private azureDevOpsService: AzureDevOpsService) {}
 
@@ -16,10 +17,40 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
         try {
             this.currentPR = pr;
             this.files = await this.azureDevOpsService.getPRFiles(pr.pullRequestId);
+            
+            // Load general comments (comments without valid file paths)
+            try {
+                const threads = await this.azureDevOpsService.getPRThreads(pr.pullRequestId);
+                this.generalComments = threads
+                    .filter((thread: any) => {
+                        // A thread is "general" only if it has NO threadContext at all,
+                        // or if threadContext exists but filePath is explicitly null/undefined/empty
+                        const hasNoContext = !thread.threadContext;
+                        const hasEmptyFilePath = thread.threadContext && 
+                            (!thread.threadContext.filePath || thread.threadContext.filePath.trim() === '');
+                        
+                        console.log(`[GeneralComments] Thread ${thread.id}: hasNoContext=${hasNoContext}, hasEmptyFilePath=${hasEmptyFilePath}, filePath="${thread.threadContext?.filePath || 'none'}"`);
+                        
+                        return hasNoContext || hasEmptyFilePath;
+                    })
+                    .flatMap((thread: any) => 
+                        thread.comments.map((comment: any) => ({
+                            ...comment,
+                            thread: thread
+                        }))
+                    );
+                    
+                console.log(`[GeneralComments] Found ${this.generalComments.length} general comments`);
+            } catch (commentError) {
+                console.error('Failed to load general comments:', commentError);
+                this.generalComments = [];
+            }
+            
             this._onDidChangeTreeData.fire();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load PR files: ${error}`);
             this.files = [];
+            this.generalComments = [];
             this._onDidChangeTreeData.fire();
         }
     }
@@ -192,6 +223,30 @@ export class PRFilesTreeDataProvider implements vscode.TreeDataProvider<PRFileTr
             vscode.TreeItemCollapsibleState.None,
             'files'
         ));
+
+        // General comments (comments not tied to specific files)
+        if (this.generalComments.length > 0) {
+            // Group by author
+            const commentsByAuthor = new Map<string, any[]>();
+            for (const comment of this.generalComments) {
+                const author = comment.author?.displayName || 'Unknown';
+                if (!commentsByAuthor.has(author)) {
+                    commentsByAuthor.set(author, []);
+                }
+                commentsByAuthor.get(author)!.push(comment);
+            }
+
+            items.push(new PRFileTreeItem(
+                pr,
+                undefined,
+                `💬 General Comments (${this.generalComments.length})`,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'comment',
+                undefined,
+                undefined,
+                Array.from(commentsByAuthor.entries())
+            ));
+        }
 
         return items;
     }

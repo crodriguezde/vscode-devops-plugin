@@ -207,33 +207,47 @@ export class AzureDevOpsService {
         }
     }
 
-    async getPRThreads(pullRequestId: number): Promise<PRThread[]> {
+    async getPRThreads(pullRequestId: number, force: boolean = false): Promise<PRThread[]> {
         await this.ensureInitialized();
 
         if (!this.config.repository) {
             throw new Error('Repository not configured. Please set azureDevOpsPR.repository in settings.');
         }
 
+        console.log(`[AzureDevOps] Fetching PR threads for PR #${pullRequestId} (force: ${force})`);
+        
         const threads = await this.gitApi!.getThreads(
             this.config.repository,
             pullRequestId,
             this.config.project
         );
 
-        return threads.map((thread: any) => ({
+        console.log(`[AzureDevOps] Received ${threads.length} threads from API`);
+        
+        // Filter out deleted comments
+        const activeThreads = threads.filter((thread: any) => {
+            const hasActiveComments = thread.comments?.some((c: any) => !c.isDeleted);
+            return hasActiveComments;
+        });
+
+        console.log(`[AzureDevOps] ${activeThreads.length} threads with active comments`);
+
+        return activeThreads.map((thread: any) => ({
             id: thread.id,
-            comments: thread.comments.map((comment: any) => ({
-                id: comment.id,
-                content: comment.content,
-                author: {
-                    displayName: comment.author.displayName,
-                    uniqueName: comment.author.uniqueName
-                },
-                publishedDate: comment.publishedDate,
-                threadId: thread.id,
-                isDeleted: comment.isDeleted || false,
-                commentType: comment.commentType
-            })),
+            comments: thread.comments
+                .filter((comment: any) => !comment.isDeleted) // Filter out deleted comments
+                .map((comment: any) => ({
+                    id: comment.id,
+                    content: comment.content,
+                    author: {
+                        displayName: comment.author.displayName,
+                        uniqueName: comment.author.uniqueName
+                    },
+                    publishedDate: comment.publishedDate,
+                    threadId: thread.id,
+                    isDeleted: comment.isDeleted || false,
+                    commentType: comment.commentType
+                })),
             status: thread.status,
             threadContext: thread.threadContext ? {
                 filePath: thread.threadContext.filePath,
@@ -336,6 +350,46 @@ export class AzureDevOpsService {
                 },
                 rightFileEnd: {
                     line: lineNumber,
+                    offset: 1
+                }
+            }
+        };
+
+        await this.gitApi!.createThread(
+            thread,
+            this.config.repository,
+            pullRequestId,
+            this.config.project
+        );
+    }
+
+    async addInlineCommentRange(
+        pullRequestId: number,
+        content: string,
+        filePath: string,
+        startLine: number,
+        endLine: number
+    ): Promise<void> {
+        await this.ensureInitialized();
+
+        if (!this.config.repository) {
+            throw new Error('Repository not configured. Please set azureDevOpsPR.repository in settings.');
+        }
+
+        const thread: any = {
+            comments: [{
+                content: content,
+                commentType: 1
+            }],
+            status: 1,
+            threadContext: {
+                filePath: filePath,
+                rightFileStart: {
+                    line: startLine,
+                    offset: 1
+                },
+                rightFileEnd: {
+                    line: endLine,
                     offset: 1
                 }
             }

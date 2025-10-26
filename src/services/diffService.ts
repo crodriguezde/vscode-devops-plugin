@@ -77,7 +77,7 @@ export class DiffService {
                 modifiedUri = await this.toGitUri(fullPath, sourceBranch);
             }
 
-            // Open diff editor
+            // Open diff editor - ALWAYS in Column One (main editor area)
             const fileName = normalizedPath.split('/').pop();
             const editableIndicator = currentBranch === sourceBranch ? ' ✏️' : '';
             const title = `${fileName} (${targetBranch} ↔ ${sourceBranch})${editableIndicator}`;
@@ -89,7 +89,8 @@ export class DiffService {
                 title,
                 {
                     preview: false,
-                    preserveFocus: false
+                    preserveFocus: false,
+                    viewColumn: vscode.ViewColumn.One // Force main editor column
                 }
             );
 
@@ -135,20 +136,67 @@ export class DiffService {
             throw new Error('No git repository found');
         }
         
-        // Use the repository's toGitUri method which properly formats the URI
-        try {
-            return await repo.toGitUri(uri, ref);
-        } catch (error) {
-            // Fallback: construct URI manually if toGitUri fails
-            console.warn('toGitUri failed, using fallback:', error);
-            return uri.with({
-                scheme: 'git',
-                query: JSON.stringify({
-                    path: uri.fsPath,
-                    ref: ref
-                })
-            });
+        // Check if we need to fetch the ref
+        if (ref.startsWith('origin/')) {
+            const branchName = ref.substring(7); // Remove 'origin/' prefix
+            
+            // Check if the local branch exists and is up to date
+            const branches = repo.state.refs;
+            const hasLocalBranch = branches?.some((b: any) => 
+                b.name === branchName && b.type === 0 // 0 = head/branch
+            );
+            
+            if (!hasLocalBranch) {
+                // Only fetch if we don't have the branch locally
+                try {
+                    console.log(`Fetching ${ref} from remote (not found locally)`);
+                    await repo.fetch('origin', branchName);
+                } catch (fetchError) {
+                    console.warn(`Failed to fetch ${ref}, continuing anyway:`, fetchError);
+                }
+            } else {
+                console.log(`Using local branch ${branchName} (skipping fetch)`);
+            }
         }
+        
+        // Check if toGitUri method exists (it may not be available in all Git extension versions)
+        if (typeof repo.toGitUri === 'function') {
+            try {
+                const gitUri = await repo.toGitUri(uri, ref);
+                console.log(`Created git URI for ${uri.fsPath} at ref ${ref}`);
+                return gitUri;
+            } catch (error) {
+                console.error('toGitUri failed:', error);
+                
+                // Try without 'origin/' prefix if that was causing issues
+                if (ref.startsWith('origin/')) {
+                    const localRef = ref.substring(7);
+                    console.log(`Retrying with local ref: ${localRef}`);
+                    try {
+                        return await repo.toGitUri(uri, localRef);
+                    } catch (retryError) {
+                        console.error('Retry with local ref also failed:', retryError);
+                        // Fall through to manual construction
+                    }
+                }
+            }
+        } else {
+            console.log('toGitUri not available, using manual URI construction');
+        }
+        
+        // Fallback: Construct git URI manually
+        // This works across different Git extension versions
+        const gitUri = uri.with({
+            scheme: 'git',
+            path: uri.path,
+            query: JSON.stringify({
+                path: uri.fsPath,
+                ref: ref
+            })
+        });
+        
+        console.log(`Created manual git URI for ${uri.fsPath} at ref ${ref}`);
+        return gitUri;
     }
 
     /**

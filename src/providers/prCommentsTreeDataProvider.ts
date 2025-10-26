@@ -8,13 +8,30 @@ export class PRCommentsTreeDataProvider implements vscode.TreeDataProvider<PRCom
 
     private currentPR?: PullRequest;
     private threads: PRThread[] = [];
+    private groupingMode: 'file' | 'people' = 'file';
 
     constructor(private azureDevOpsService: AzureDevOpsService) {}
+
+    public toggleGrouping(): void {
+        this.groupingMode = this.groupingMode === 'file' ? 'people' : 'file';
+        this._onDidChangeTreeData.fire();
+    }
+
+    public getGroupingMode(): 'file' | 'people' {
+        return this.groupingMode;
+    }
+
+    private getFileName(path: string): string {
+        const parts = path.split('/');
+        return parts[parts.length - 1];
+    }
 
     async loadPR(pr: PullRequest): Promise<void> {
         try {
             this.currentPR = pr;
-            this.threads = await this.azureDevOpsService.getPRThreads(pr.pullRequestId);
+            const allThreads = await this.azureDevOpsService.getPRThreads(pr.pullRequestId);
+            // Filter out general comments (those without file paths) - they're shown in PR Files view
+            this.threads = allThreads.filter((thread: any) => thread.threadContext?.filePath);
             this._onDidChangeTreeData.fire();
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load PR comments: ${error}`);
@@ -39,13 +56,73 @@ export class PRCommentsTreeDataProvider implements vscode.TreeDataProvider<PRCom
         }
 
         if (!element) {
-            // Root level - show only thread roots (no children)
-            return this.threads.map(thread => 
+            if (this.groupingMode === 'file') {
+                // Group threads by file
+                const threadsByFile = new Map<string, PRThread[]>();
+                
+                for (const thread of this.threads) {
+                    const filePath = thread.threadContext?.filePath || 'Unknown';
+                    if (!threadsByFile.has(filePath)) {
+                        threadsByFile.set(filePath, []);
+                    }
+                    threadsByFile.get(filePath)!.push(thread);
+                }
+                
+                // Create items for each file
+                return Array.from(threadsByFile.entries()).map(([filePath, threads]) => {
+                    const fileName = this.getFileName(filePath);
+                    const commentCount = threads.reduce((sum, t) => sum + t.comments.length, 0);
+                    
+                    return new PRCommentTreeItem(
+                        this.currentPR!,
+                        undefined,
+                        undefined,
+                        vscode.TreeItemCollapsibleState.Collapsed,
+                        false,
+                        fileName,
+                        commentCount,
+                        threads
+                    );
+                });
+            } else {
+                // Group threads by author (people view)
+                const threadsByAuthor = new Map<string, PRThread[]>();
+                
+                for (const thread of this.threads) {
+                    const author = thread.comments[0]?.author?.displayName || 'Unknown';
+                    if (!threadsByAuthor.has(author)) {
+                        threadsByAuthor.set(author, []);
+                    }
+                    threadsByAuthor.get(author)!.push(thread);
+                }
+                
+                // Create items for each author
+                return Array.from(threadsByAuthor.entries()).map(([author, threads]) => {
+                    const commentCount = threads.reduce((sum, t) => sum + t.comments.length, 0);
+                    
+                    return new PRCommentTreeItem(
+                        this.currentPR!,
+                        undefined,
+                        undefined,
+                        vscode.TreeItemCollapsibleState.Collapsed,
+                        false,
+                        author,
+                        commentCount,
+                        threads,
+                        true // isPeopleGroup
+                    );
+                });
+            }
+        }
+        
+        // If element has threads, show them
+        if (element.threads) {
+            return element.threads.map(thread => 
                 new PRCommentTreeItem(
                     this.currentPR!,
                     thread,
                     undefined,
-                    vscode.TreeItemCollapsibleState.None, // Changed from Collapsed to None
+                    vscode.TreeItemCollapsibleState.None,
                     true
                 )
             );
@@ -57,14 +134,32 @@ export class PRCommentsTreeDataProvider implements vscode.TreeDataProvider<PRCom
 }
 
 export class PRCommentTreeItem extends vscode.TreeItem {
+    public readonly threads?: PRThread[];
+
     constructor(
         public readonly pr: PullRequest,
         public readonly thread?: PRThread,
         public readonly comment?: any,
         collapsibleState: vscode.TreeItemCollapsibleState = vscode.TreeItemCollapsibleState.None,
-        private isThreadRoot: boolean = false
+        private isThreadRoot: boolean = false,
+        fileName?: string,
+        commentCount?: number,
+        threads?: PRThread[],
+        isPeopleGroup: boolean = false
     ) {
         super('', collapsibleState);
+
+        this.threads = threads;
+
+        // File group or People group item
+        if (fileName && commentCount !== undefined && threads) {
+            this.label = fileName;
+            this.description = `${commentCount} comment${commentCount !== 1 ? 's' : ''}`;
+            this.contextValue = isPeopleGroup ? 'prPeopleGroup' : 'prFileGroup';
+            this.iconPath = isPeopleGroup ? new vscode.ThemeIcon('person') : new vscode.ThemeIcon('file');
+            this.tooltip = `${fileName} - ${commentCount} comment${commentCount !== 1 ? 's' : ''}`;
+            return;
+        }
 
         if (isThreadRoot && thread) {
             // Thread root
@@ -74,7 +169,7 @@ export class PRCommentTreeItem extends vscode.TreeItem {
                 : 'General';
             
             this.label = `${fileName}: ${this.truncateText(firstComment.content, 50)}`;
-            this.tooltip = this.stripHtml(firstComment.content);
+            // No tooltip - label already shows truncated comment text
             this.description = `${thread.comments.length} comment${thread.comments.length > 1 ? 's' : ''}`;
             this.contextValue = 'prThread';
             

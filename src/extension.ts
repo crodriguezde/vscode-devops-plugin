@@ -11,8 +11,10 @@ import { CommentCodeLensProvider } from './providers/commentCodeLensProvider';
 import { SettingsWebviewProvider } from './providers/settingsWebviewProvider';
 import { DiffService } from './services/diffService';
 import { CommentChatWebviewProvider } from './providers/commentChatWebviewProvider';
+import { DynamicCommandManager } from './services/dynamicCommandManager';
 
 let azureDevOpsService: AzureDevOpsService;
+let dynamicCommandManager: DynamicCommandManager;
 let commentChatProvider: CommentChatWebviewProvider;
 let settingsWebviewProvider: SettingsWebviewProvider;
 let authProvider: AzureCliAuthProvider;
@@ -25,6 +27,18 @@ let commentCodeLensProvider: CommentCodeLensProvider;
 let diffService: DiffService;
 let extensionContext: vscode.ExtensionContext;
 
+/**
+ * Show an information message that auto-closes after the configured timeout
+ * Uses status bar for non-critical success messages
+ */
+function showAutoCloseMessage(message: string): void {
+    const config = vscode.workspace.getConfiguration('azureDevOpsPR');
+    const timeout = config.get<number>('notificationTimeout', 3000);
+    
+    // Show in status bar with auto-close
+    vscode.window.setStatusBarMessage(`$(check) ${message}`, timeout);
+}
+
 export function activate(context: vscode.ExtensionContext) {
     extensionContext = context;
     console.log('Azure DevOps PR Viewer is now active');
@@ -32,6 +46,11 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize services with Azure CLI authentication
     authProvider = new AzureCliAuthProvider();
     azureDevOpsService = new AzureDevOpsService(authProvider);
+    
+    // Initialize dynamic command manager for mode-specific commands
+    // This eliminates the need for context keys that can cause disposal errors
+    dynamicCommandManager = new DynamicCommandManager();
+    context.subscriptions.push(dynamicCommandManager);
 
     // Initialize enhanced diff provider
     enhancedDiffProvider = new EnhancedDiffProvider(azureDevOpsService);
@@ -48,10 +67,14 @@ export function activate(context: vscode.ExtensionContext) {
     prTreeDataProvider = new PRTreeDataProvider(azureDevOpsService, context);
     prFilesTreeDataProvider = new PRFilesTreeDataProvider(azureDevOpsService);
     prCommentsTreeDataProvider = new PRCommentsTreeDataProvider(azureDevOpsService);
-
-    // Initialize context for manual mode and work items mode button visibility
-    vscode.commands.executeCommand('setContext', 'azureDevOpsPR.manualMode', false);
-    vscode.commands.executeCommand('setContext', 'azureDevOpsPR.workItemsMode', false);
+    
+    // Set up context keys for mode visibility
+    const setModeContext = (mode: 'people' | 'workitems' | 'manual') => {
+        vscode.commands.executeCommand('setContext', 'azureDevOpsPR.mode', mode);
+    };
+    
+    // Initialize with people mode
+    setModeContext('people');
     
     // Initialize current level context
     prTreeDataProvider.updateLevelContext();
@@ -59,8 +82,43 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize settings webview provider
     settingsWebviewProvider = new SettingsWebviewProvider(context);
 
-    // Initialize comment chat webview provider
+    // Initialize comment chat webview provider as webview view (sidebar)
     commentChatProvider = new CommentChatWebviewProvider(context);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            'azureDevOpsPRCommentChat',
+            commentChatProvider
+        )
+    );
+    
+    // Set up comment handler for inline comment service
+    commentChatProvider.setCommentSubmitHandler(async (reply: string) => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage('No active editor');
+            return;
+        }
+        
+        const selection = editor.selection;
+        const startLine = selection.start.line + 1; // Convert to 1-based
+        const endLine = selection.end.line + 1;
+        const filePath = getRelativeFilePath(editor.document.uri);
+        
+        // Use the range-aware method
+        await inlineCommentProvider.addCommentAtLineRange(filePath, startLine, endLine, reply);
+        
+        // Refresh inline comments to show the new comment bubble in the diff editor
+        await inlineCommentProvider.refreshComments();
+        commentCodeLensProvider.refresh();
+        
+        // Also refresh the comments tree view
+        await prCommentsTreeDataProvider.refresh();
+        
+        const lineInfo = startLine === endLine 
+            ? `line ${startLine}` 
+            : `lines ${startLine}-${endLine}`;
+        vscode.window.showInformationMessage(`✓ Comment added at ${lineInfo}`);
+    });
 
     // Initialize diff service
     diffService = new DiffService(azureDevOpsService);
@@ -91,21 +149,9 @@ export function activate(context: vscode.ExtensionContext) {
     // Note: Checkboxes are not used in this implementation
     // We use visual indicators (⏳ and ✓) in the description instead
     
-    context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOpsPR.groupByWorkItems', async () => {
-            await prTreeDataProvider.setGroupingMode('workitems');
-        })
-    );
-
-    // Manual Grouping Commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOpsPR.groupByManual', async () => {
-            await prTreeDataProvider.setGroupingMode('manual');
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('azureDevOpsPR.createManualGroup', async () => {
+    // Define command callbacks for dynamic registration
+    const modeCommandCallbacks = {
+        createManualGroup: async () => {
             const name = await vscode.window.showInputBox({
                 prompt: 'Enter group name',
                 placeHolder: 'My Group',
@@ -120,9 +166,8 @@ export function activate(context: vscode.ExtensionContext) {
                 await prTreeDataProvider.createManualGroup(name.trim());
                 vscode.window.showInformationMessage(`Created group: ${name}`);
             }
-        }),
-
-        vscode.commands.registerCommand('azureDevOpsPR.deleteAllManualGroups', async () => {
+        },
+        deleteAllManualGroups: async () => {
             const groups = prTreeDataProvider.getManualGroups();
             if (groups.length === 0) {
                 vscode.window.showInformationMessage('No groups to delete');
@@ -140,6 +185,73 @@ export function activate(context: vscode.ExtensionContext) {
                 await prTreeDataProvider.deleteAllManualGroups();
                 vscode.window.showInformationMessage(`Deleted ${groups.length} group(s), unassigned ${totalPRs} PR(s)`);
             }
+        },
+        selectWorkItemLevel: async () => {
+            const currentLevel = prTreeDataProvider.getCurrentWorkItemLevel();
+            
+            const levelOptions = [
+                {
+                    label: '$(circle-outline) Level 0',
+                    description: 'Group by directly linked work item',
+                    level: 0
+                },
+                {
+                    label: '$(circle-outline) Level 1',
+                    description: 'Group by parent of work item (1 level up)',
+                    level: 1
+                },
+                {
+                    label: '$(circle-outline) Level 2',
+                    description: 'Group by grandparent (2 levels up)',
+                    level: 2
+                },
+                {
+                    label: '$(circle-outline) Level 3',
+                    description: 'Group by great-grandparent (3 levels up)',
+                    level: 3
+                },
+                {
+                    label: '$(circle-outline) Level 4',
+                    description: 'Group by 4 levels up from work item',
+                    level: 4
+                }
+            ];
+            
+            // Mark the current level with a filled circle
+            levelOptions[currentLevel].label = `$(circle-filled) Level ${currentLevel} (Current)`;
+            
+            const selected = await vscode.window.showQuickPick(levelOptions, {
+                placeHolder: `Select work item grouping level (Current: Level ${currentLevel})`,
+                title: 'Work Item Grouping Level'
+            });
+            
+            if (selected && selected.level !== currentLevel) {
+                await prTreeDataProvider.setWorkItemLevel(selected.level);
+                vscode.window.showInformationMessage(`✓ Work item grouping set to Level ${selected.level}`);
+            }
+        }
+    };
+
+    // Register mode-specific commands on startup so they're always available
+    // (The dynamic manager approach was causing issues with menu visibility)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('azureDevOpsPR.createManualGroup', modeCommandCallbacks.createManualGroup),
+        vscode.commands.registerCommand('azureDevOpsPR.deleteAllManualGroups', modeCommandCallbacks.deleteAllManualGroups),
+        vscode.commands.registerCommand('azureDevOpsPR.selectWorkItemLevel', modeCommandCallbacks.selectWorkItemLevel),
+        
+        vscode.commands.registerCommand('azureDevOpsPR.groupByPeople', async () => {
+            setModeContext('people');
+            await prTreeDataProvider.setGroupingMode('people');
+        }),
+        
+        vscode.commands.registerCommand('azureDevOpsPR.groupByWorkItems', async () => {
+            setModeContext('workitems');
+            await prTreeDataProvider.setGroupingMode('workitems');
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.groupByManual', async () => {
+            setModeContext('manual');
+            await prTreeDataProvider.setGroupingMode('manual');
         })
     );
 
@@ -230,6 +342,24 @@ export function activate(context: vscode.ExtensionContext) {
 
         vscode.commands.registerCommand('azureDevOpsPR.refreshPRs', async () => {
             await refreshPRs();
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.refreshPRFiles', async () => {
+            await refreshPRFiles();
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.refreshPRComments', async () => {
+            await refreshPRCommentsView();
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.toggleCommentsGrouping', async () => {
+            prCommentsTreeDataProvider.toggleGrouping();
+            const mode = prCommentsTreeDataProvider.getGroupingMode();
+            vscode.window.showInformationMessage(`Comments grouped by ${mode === 'file' ? 'File' : 'People'}`);
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.refreshCommentChat', async () => {
+            await refreshCommentChat();
         }),
 
         vscode.commands.registerCommand('azureDevOpsPR.openPR', async (prItem, fromContextMenu = false) => {
@@ -391,56 +521,76 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        vscode.commands.registerCommand('azureDevOpsPR.groupByPeople', async () => {
-            await prTreeDataProvider.setGroupingMode('people');
-        }),
-
         vscode.commands.registerCommand('azureDevOpsPR.jumpToCommentInDiff', async (args) => {
             await jumpToCommentInDiff(args);
         }),
 
-        vscode.commands.registerCommand('azureDevOpsPR.selectWorkItemLevel', async () => {
-            const currentLevel = prTreeDataProvider.getCurrentWorkItemLevel();
+
+        vscode.commands.registerCommand('azureDevOpsPR.clearAllToggles', async () => {
+            const confirm = await vscode.window.showWarningMessage(
+                'Clear all "Pending My Review" and "Reviewed by Me" toggles?',
+                { modal: true },
+                'Clear All', 'Cancel'
+            );
             
-            const levelOptions = [
-                {
-                    label: '$(circle-outline) Level 0',
-                    description: 'Group by directly linked work item',
-                    level: 0
-                },
-                {
-                    label: '$(circle-outline) Level 1',
-                    description: 'Group by parent of work item (1 level up)',
-                    level: 1
-                },
-                {
-                    label: '$(circle-outline) Level 2',
-                    description: 'Group by grandparent (2 levels up)',
-                    level: 2
-                },
-                {
-                    label: '$(circle-outline) Level 3',
-                    description: 'Group by great-grandparent (3 levels up)',
-                    level: 3
-                },
-                {
-                    label: '$(circle-outline) Level 4',
-                    description: 'Group by 4 levels up from work item',
-                    level: 4
-                }
-            ];
-            
-            // Mark the current level with a filled circle
-            levelOptions[currentLevel].label = `$(circle-filled) Level ${currentLevel} (Current)`;
-            
-            const selected = await vscode.window.showQuickPick(levelOptions, {
-                placeHolder: `Select work item grouping level (Current: Level ${currentLevel})`,
-                title: 'Work Item Grouping Level'
-            });
-            
-            if (selected && selected.level !== currentLevel) {
-                await prTreeDataProvider.setWorkItemLevel(selected.level);
-                vscode.window.showInformationMessage(`✓ Work item grouping set to Level ${selected.level}`);
+            if (confirm === 'Clear All') {
+                const count = prTreeDataProvider.clearAllToggles();
+                vscode.window.showInformationMessage(`✓ Cleared ${count} review toggle(s)`);
+            }
+        }),
+
+        vscode.commands.registerCommand('azureDevOpsPR.openCommentChat', async (args: any) => {
+            if (!args || !args.thread || !args.pr) {
+                return;
+            }
+
+            try {
+                // Get current user info
+                const currentUser = await azureDevOpsService.getCurrentUser();
+                const currentUserId = currentUser?.id || '';
+
+                // Convert CommentThread to format expected by chat provider
+                const comments = args.thread.comments.map((c: any) => ({
+                    author: c.author?.displayName || 'Unknown',
+                    content: c.content || '',
+                    date: new Date(c.publishedDate || Date.now()),
+                    isCurrentUser: c.author?.uniqueName === currentUser?.emailAddress
+                }));
+
+                // Build title
+                const fileName = args.filePath?.split('/').pop() || 'Comment';
+                const lineNumber = args.lineNumber || args.thread.lineStart;
+                const title = `💬 ${fileName} (Line ${lineNumber})`;
+
+                // Show chat interface
+                await commentChatProvider.show(
+                    comments,
+                    title,
+                    async (reply: string) => {
+                        await azureDevOpsService.addCommentToThread(
+                            args.pr.pullRequestId,
+                            args.thread.id,
+                            reply
+                        );
+                        await prCommentsTreeDataProvider.refresh();
+                        await inlineCommentProvider.refreshComments();
+                    },
+                    args.thread.id,
+                    args.thread.status === 2 // 2 = Fixed/Resolved in Azure DevOps
+                );
+
+                // Set resolve handler
+                commentChatProvider['onResolve'] = async () => {
+                    await azureDevOpsService.resolveThread(
+                        args.pr.pullRequestId,
+                        args.thread.id
+                    );
+                    await prCommentsTreeDataProvider.refresh();
+                    await inlineCommentProvider.refreshComments();
+                };
+            } catch (error) {
+                console.error('Failed to open comment chat:', error);
+                vscode.window.showErrorMessage(`Failed to open comment chat: ${error}`);
             }
         })
     );
@@ -456,9 +606,46 @@ export function activate(context: vscode.ExtensionContext) {
 async function refreshPRs() {
     try {
         await prTreeDataProvider.refresh();
+        // Cascade refresh to PR Files, Comments, and Comment Chat
+        await prFilesTreeDataProvider.refresh();
+        await prCommentsTreeDataProvider.refresh();
+        await inlineCommentProvider.refreshComments();
         vscode.window.showInformationMessage('Pull requests refreshed');
     } catch (error) {
         vscode.window.showErrorMessage(`Failed to refresh PRs: ${error}`);
+    }
+}
+
+async function refreshPRFiles() {
+    try {
+        await prFilesTreeDataProvider.refresh();
+        // Cascade refresh to Comments and Comment Chat
+        await prCommentsTreeDataProvider.refresh();
+        await inlineCommentProvider.refreshComments();
+        vscode.window.showInformationMessage('PR files refreshed');
+    } catch (error) {
+        vscode.window.showErrorMessage(`Failed to refresh PR files: ${error}`);
+    }
+}
+
+async function refreshPRCommentsView() {
+    try {
+        await prCommentsTreeDataProvider.refresh();
+        await inlineCommentProvider.refreshComments();
+        vscode.window.showInformationMessage('Comments refreshed');
+    } catch (error) {
+        vscode.window.showErrorMessage(`Failed to refresh comments: ${error}`);
+    }
+}
+
+async function refreshCommentChat() {
+    try {
+        // Refresh the current chat view (it will reload based on current selection/context)
+        await inlineCommentProvider.refreshComments();
+        commentCodeLensProvider.refresh();
+        vscode.window.showInformationMessage('Comment chat refreshed');
+    } catch (error) {
+        vscode.window.showErrorMessage(`Failed to refresh comment chat: ${error}`);
     }
 }
 
@@ -470,19 +657,24 @@ async function openPR(prItem: any, fromContextMenu: boolean = false) {
     try {
         const sourceBranch = prItem.pr.sourceRefName.replace('refs/heads/', '');
         
-        // Only show confirmation if opened from context menu
-        if (fromContextMenu) {
-            const confirm = await vscode.window.showInformationMessage(
-                `Open PR #${prItem.pr.pullRequestId}? This will fetch and checkout branch '${sourceBranch}'.`,
-                { modal: true },
-                'Open PR',
-                'Cancel'
-            );
+        // Always show confirmation with window closing info
+        const message = fromContextMenu
+            ? `Open PR #${prItem.pr.pullRequestId}?\n\nThis will:\n• Close all open editor windows\n• Fetch and checkout branch '${sourceBranch}'\n• Load PR files and comments`
+            : `Opening PR #${prItem.pr.pullRequestId} will close all open editor windows.\n\nContinue?`;
             
-            if (confirm !== 'Open PR') {
-                return;
-            }
+        const confirm = await vscode.window.showInformationMessage(
+            message,
+            { modal: true },
+            'Open PR',
+            'Cancel'
+        );
+        
+        if (confirm !== 'Open PR') {
+            return;
         }
+        
+        // Close all open editors
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         
         // Show progress
         await vscode.window.withProgress({
@@ -619,14 +811,43 @@ async function viewPRDetails(context: vscode.ExtensionContext, prItem: any) {
     }
 }
 
+// Track files currently being opened to prevent double-clicks
+const filesBeingOpened = new Set<string>();
+
 async function viewFile(fileItem: any) {
     if (!fileItem || !fileItem.file) {
         return;
     }
 
+    const fileKey = `${fileItem.pr.pullRequestId}-${fileItem.file.path}`;
+    
+    // Check if this file is already being opened
+    if (filesBeingOpened.has(fileKey)) {
+        vscode.window.showInformationMessage(
+            `Opening ${fileItem.file.path.split('/').pop()}... Please wait.`
+        );
+        return;
+    }
+
+    // Mark file as being opened
+    filesBeingOpened.add(fileKey);
+
     try {
-        // Use diff service to show side-by-side comparison
-        await diffService.openDiff(fileItem.pr, fileItem.file);
+        // Show progress notification
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `Opening ${fileItem.file.path.split('/').pop()}`,
+            cancellable: false
+        }, async (progress) => {
+            progress.report({ message: 'Loading diff...' });
+            
+            try {
+                // Use diff service to show side-by-side comparison
+                await diffService.openDiff(fileItem.pr, fileItem.file);
+            } catch (error) {
+                throw error; // Will be caught by outer try-catch
+            }
+        });
     } catch (error) {
         vscode.window.showErrorMessage(`Failed to view file diff: ${error}`);
         
@@ -646,6 +867,9 @@ async function viewFile(fileItem: any) {
         } catch (fallbackError) {
             vscode.window.showErrorMessage(`Failed to view file: ${fallbackError}`);
         }
+    } finally {
+        // Always remove from the set when done
+        filesBeingOpened.delete(fileKey);
     }
 }
 
@@ -804,11 +1028,14 @@ async function replyToComment(commentItem: any) {
             isCurrentUser: c.author?.id === currentUserId
         }));
 
-        // Show chat interface
+        // Show chat interface with better title including line info
         const fileName = thread.threadContext?.filePath?.split('/').pop() || 'Comment';
+        const lineNumber = thread.threadContext?.rightFileStart?.line;
+        const titleSuffix = lineNumber ? ` (Line ${lineNumber})` : '';
+        
         await commentChatProvider.show(
             comments,
-            `${fileName} - Comment Thread`,
+            `💬 ${fileName}${titleSuffix}`,
             async (reply: string) => {
                 await azureDevOpsService.addCommentToThread(
                     commentItem.pr.pullRequestId,
@@ -816,8 +1043,19 @@ async function replyToComment(commentItem: any) {
                     reply
                 );
                 await prCommentsTreeDataProvider.refresh();
-            }
+            },
+            threadId,
+            thread.status === 2 // 2 = Fixed/Resolved in Azure DevOps
         );
+        
+        // Set resolve handler
+        commentChatProvider['onResolve'] = async () => {
+            await azureDevOpsService.resolveThread(
+                commentItem.pr.pullRequestId,
+                threadId
+            );
+            await prCommentsTreeDataProvider.refresh();
+        };
     } catch (error) {
         vscode.window.showErrorMessage(`Failed to open comment chat: ${error}`);
         console.error('Reply to comment error:', error);
@@ -1043,26 +1281,33 @@ async function jumpToCommentInDiff(args: any) {
             }
         }
 
-        // Normalize file path
+        // Normalize file path - use the same logic as inlineCommentProvider
         const gitRoot = repo.rootUri;
         let normalizedPath = args.filePath.startsWith('/') 
             ? args.filePath.substring(1) 
             : args.filePath;
         
-        // Remove repo name if present in path
+        // Remove repo name if present in path (Azure DevOps sometimes includes it)
         const gitRootName = gitRoot.path.split('/').pop();
         if (gitRootName && normalizedPath.startsWith(gitRootName + '/')) {
             normalizedPath = normalizedPath.substring(gitRootName.length + 1);
         }
         
+        console.log(`[JumpToComment] Original path: ${args.filePath}`);
+        console.log(`[JumpToComment] Normalized path: ${normalizedPath}`);
+        console.log(`[JumpToComment] Git root: ${gitRoot.fsPath}`);
+        
         // Construct the file URI
         const fileUri = vscode.Uri.joinPath(gitRoot, normalizedPath);
+        console.log(`[JumpToComment] Full file URI: ${fileUri.toString()}`);
         
         // Check if file exists
         try {
             await vscode.workspace.fs.stat(fileUri);
-        } catch {
-            vscode.window.showErrorMessage(`File not found: ${normalizedPath}`);
+        } catch (statError) {
+            console.error(`[JumpToComment] File not found at: ${fileUri.fsPath}`);
+            console.error(`[JumpToComment] Stat error:`, statError);
+            vscode.window.showErrorMessage(`File not found: ${normalizedPath}\n\nTried: ${fileUri.fsPath}`);
             return;
         }
         
@@ -1106,11 +1351,13 @@ async function jumpToCommentInDiff(args: any) {
                         reply
                     );
                     await prCommentsTreeDataProvider.refresh();
-                }
+                },
+                thread.id,
+                thread.status === 2 || thread.status === 'fixed' || thread.status === 'closed'
             );
         }
     } catch (error) {
-        console.error('Failed to jump to comment:', error);
+        console.error('[JumpToComment] Failed to jump to comment:', error);
         vscode.window.showErrorMessage(`Failed to open file: ${error}`);
     }
 }

@@ -3,7 +3,7 @@
   "displayName": "Azure DevOps PR Viewer",
   "description": "Visualize and interact with Azure DevOps Pull Requests directly in VSCode",
   "version": "0.1.0",
-  "publisher": "your-publisher-name",
+  "publisher": "crodriguezde",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -188,6 +188,31 @@
         "command": "azureDevOpsPR.selectWorkItemLevel",
         "title": "Select Work Item Level",
         "icon": "$(layers)"
+      },
+      {
+        "command": "azureDevOpsPR.clearAllToggles",
+        "title": "Clear All Review Toggles",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "azureDevOpsPR.refreshPRFiles",
+        "title": "Refresh PR Files",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "azureDevOpsPR.refreshPRComments",
+        "title": "Refresh Comments",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "azureDevOpsPR.refreshCommentChat",
+        "title": "Refresh Comment Chat",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "azureDevOpsPR.toggleCommentsGrouping",
+        "title": "Toggle Comments Grouping",
+        "icon": "$(list-tree)"
       }
     ],
     "viewsContainers": {
@@ -212,6 +237,11 @@
         {
           "id": "azureDevOpsPRComments",
           "name": "Comments"
+        },
+        {
+          "id": "azureDevOpsPRCommentChat",
+          "name": "Comment Chat",
+          "type": "webview"
         }
       ]
     },
@@ -233,47 +263,57 @@
           "group": "navigation@2"
         },
         {
-          "command": "azureDevOpsPR.createManualGroup",
-          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.manualMode",
+          "command": "azureDevOpsPR.selectWorkItemLevel",
+          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.mode == workitems",
           "group": "navigation@3"
         },
         {
-          "command": "azureDevOpsPR.deleteAllManualGroups",
-          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.manualMode",
+          "command": "azureDevOpsPR.createManualGroup",
+          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.mode == manual",
           "group": "navigation@4"
         },
         {
-          "command": "azureDevOpsPR.selectWorkItemLevel",
-          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.workItemsMode",
+          "command": "azureDevOpsPR.deleteAllManualGroups",
+          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.mode == manual",
           "group": "navigation@5"
         },
         {
-          "command": "azureDevOpsPR.openSettings",
+          "command": "azureDevOpsPR.clearAllToggles",
           "when": "view == azureDevOpsPRExplorer",
           "group": "navigation@6"
         },
         {
-          "command": "azureDevOpsPR.refreshPRs",
+          "command": "azureDevOpsPR.openSettings",
           "when": "view == azureDevOpsPRExplorer",
           "group": "navigation@7"
         },
         {
-          "command": "azureDevOpsPR.toggleInlineComments",
+          "command": "azureDevOpsPR.refreshPRs",
+          "when": "view == azureDevOpsPRExplorer",
+          "group": "navigation@8"
+        },
+        {
+          "command": "azureDevOpsPR.refreshPRFiles",
+          "when": "view == azureDevOpsPRFiles",
+          "group": "navigation@1"
+        },
+        {
+          "command": "azureDevOpsPR.toggleCommentsGrouping",
           "when": "view == azureDevOpsPRComments",
           "group": "navigation@1"
         },
         {
-          "command": "azureDevOpsPR.refreshInlineComments",
+          "command": "azureDevOpsPR.refreshPRComments",
           "when": "view == azureDevOpsPRComments",
           "group": "navigation@2"
+        },
+        {
+          "command": "azureDevOpsPR.refreshCommentChat",
+          "when": "view == azureDevOpsPRCommentChat",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
-        {
-          "command": "azureDevOpsPR.createManualGroup",
-          "when": "view == azureDevOpsPRExplorer && azureDevOpsPR.manualMode",
-          "group": "0_create@1"
-        },
         {
           "command": "azureDevOpsPR.openPRFromContext",
           "when": "view == azureDevOpsPRExplorer && viewItem == pullRequest",
@@ -488,6 +528,14 @@
           "default": true,
           "description": "Enable AI-powered comment enhancement with GitHub Copilot (requires GitHub Copilot extension)",
           "order": 52
+        },
+        "azureDevOpsPR.notificationTimeout": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 1000,
+          "maximum": 10000,
+          "description": "Time in milliseconds before notifications auto-close (1000-10000ms, default: 3000ms)",
+          "order": 53
         }
       }
     }
