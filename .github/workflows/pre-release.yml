@@ -7,6 +7,9 @@ on:
       - 'v*.*.*-alpha.*'
       - 'v*.*.*-rc.*'
 
+permissions:
+  contents: write
+
 jobs:
   pre-release:
     runs-on: ubuntu-latest
