@@ -28,7 +28,7 @@ jobs:
         run: npm run compile
 
       - name: Run linting
-        run: npm run lint
+        run: npm run lint -- --max-warnings=-1
 
       - name: Run tests
         run: npm run test

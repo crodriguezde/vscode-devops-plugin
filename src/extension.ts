@@ -726,18 +726,14 @@ async function fetchAndCheckoutBranch(pr: any): Promise<void> {
         throw new Error('No git repository found');
     }
     
-    try {
-        // Fetch the branch from origin
-        await repo.fetch('origin', sourceBranch);
-        
-        // Checkout the branch
-        await repo.checkout(sourceBranch);
-        
-        // Pull latest changes
-        await repo.pull();
-    } catch (error) {
-        throw new Error(`Failed to checkout branch: ${error}`);
-    }
+    // Fetch the branch from origin
+    await repo.fetch('origin', sourceBranch);
+    
+    // Checkout the branch
+    await repo.checkout(sourceBranch);
+    
+    // Pull latest changes
+    await repo.pull();
 }
 
 async function checkoutPRBranchSilent(pr: any): Promise<void> {
