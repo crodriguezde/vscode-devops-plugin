@@ -61,11 +61,10 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          {
-            echo 'CHANGELOG<<EOF'
-            git log $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --pretty=format:"- %s (%h)" || echo "- Initial release"
-            echo 'EOF'
-          } >> $GITHUB_OUTPUT
+          CHANGELOG=$(git log $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --pretty=format:"- %s (%h)" 2>/dev/null || echo "- Initial release")
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Pre-Release
         uses: softprops/action-gh-release@v1
