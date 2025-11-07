@@ -1,6 +1,39 @@
+# Dependencies
 node_modules
+.pnp
+.pnp.js
+
+# Build output
 out
-.vscode-test
+dist
 *.vsix
+
+# Testing
+.vscode-test
+coverage
+*.log
+
+# Environment
 .env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+*.tmp
+
+# CI/CD artifacts
+*.tgz
+.eslintcache
