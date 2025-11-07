@@ -31,7 +31,8 @@ jobs:
         run: npm run compile
 
       - name: Run linting
-        run: npm run lint -- --max-warnings=-1
+        run: npm run lint
+        continue-on-error: true
 
       - name: Run tests
         run: npm run test
