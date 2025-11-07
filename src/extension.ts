@@ -736,54 +736,6 @@ async function fetchAndCheckoutBranch(pr: any): Promise<void> {
     await repo.pull();
 }
 
-async function checkoutPRBranchSilent(pr: any): Promise<void> {
-    try {
-        const sourceBranch = pr.sourceRefName.replace('refs/heads/', '');
-        
-        // Check if workspace has a git repository
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            return;
-        }
-
-        // Use the Git extension API if available
-        const gitExtension = vscode.extensions.getExtension('vscode.git');
-        if (gitExtension) {
-            const git = gitExtension.exports.getAPI(1);
-            const repo = git.repositories[0];
-            
-            if (repo) {
-                // Fetch the branch
-                await repo.fetch();
-                
-                // Try to checkout the branch
-                try {
-                    await repo.checkout(sourceBranch);
-                } catch (checkoutError) {
-                    // Branch might not exist locally, try fetching and checking out
-                    await repo.fetch('origin', sourceBranch);
-                    await repo.checkout(sourceBranch);
-                }
-            }
-        } else {
-            // Fallback to terminal commands if Git extension not available
-            const terminal = vscode.window.createTerminal({
-                name: 'PR Checkout',
-                hideFromUser: true
-            });
-            
-            terminal.sendText(`git fetch origin ${sourceBranch}`, true);
-            terminal.sendText(`git checkout ${sourceBranch}`, true);
-            
-            // Dispose terminal after commands complete
-            setTimeout(() => terminal.dispose(), 3000);
-        }
-    } catch (error) {
-        // Silently fail - don't show error for checkout issues
-        console.error('Failed to checkout branch:', error);
-    }
-}
-
 async function viewPRDetails(context: vscode.ExtensionContext, prItem: any) {
     if (!prItem) {
         return;
@@ -836,13 +788,8 @@ async function viewFile(fileItem: any) {
             cancellable: false
         }, async (progress) => {
             progress.report({ message: 'Loading diff...' });
-            
-            try {
-                // Use diff service to show side-by-side comparison
-                await diffService.openDiff(fileItem.pr, fileItem.file);
-            } catch (error) {
-                throw error; // Will be caught by outer try-catch
-            }
+            // Use diff service to show side-by-side comparison
+            await diffService.openDiff(fileItem.pr, fileItem.file);
         });
     } catch (error) {
         vscode.window.showErrorMessage(`Failed to view file diff: ${error}`);
