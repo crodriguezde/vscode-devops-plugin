@@ -13,9 +13,181 @@ import {
     MergeConflict,
     WorkItemRef,
     Label,
-    CompletionOptions
+    CompletionOptions,
+    GitCommitRef,
+    GitItem
 } from '../types';
 import { AzureCliAuthProvider } from '../auth/azureCliAuth';
+
+// Azure DevOps API types
+interface GitPullRequest {
+    pullRequestId?: number;
+    title?: string;
+    description?: string;
+    createdBy?: {
+        displayName?: string;
+        uniqueName?: string;
+        imageUrl?: string;
+    };
+    creationDate?: Date;
+    status?: number;
+    sourceRefName?: string;
+    targetRefName?: string;
+    reviewers?: Array<{
+        displayName?: string;
+        uniqueName?: string;
+        vote?: number;
+        isRequired?: boolean;
+    }>;
+    labels?: Array<{
+        id?: string;
+        name?: string;
+        active?: boolean;
+    }>;
+    mergeStatus?: string;
+    isDraft?: boolean;
+    workItemRefs?: Array<{
+        id?: string;
+        url?: string;
+    }>;
+    _links?: {
+        web?: {
+            href?: string;
+        };
+    };
+}
+
+interface GitPullRequestSearchCriteria {
+    status?: string;
+    includeLinks?: boolean;
+}
+
+interface GitPullRequestIteration {
+    id?: number;
+    author?: {
+        displayName?: string;
+        uniqueName?: string;
+    };
+    createdDate?: Date;
+    description?: string;
+    sourceRefCommit?: {
+        commitId?: string;
+    };
+    targetRefCommit?: {
+        commitId?: string;
+    };
+}
+
+interface ChangeEntry {
+    item?: {
+        path?: string;
+        objectId?: string;
+        originalObjectId?: string;
+    };
+    changeType?: string;
+}
+
+interface GitPullRequestIterationChanges {
+    changeEntries?: ChangeEntry[];
+}
+
+interface CommentThread {
+    id?: number;
+    comments?: Array<{
+        id?: number;
+        content?: string;
+        author?: {
+            displayName?: string;
+            uniqueName?: string;
+            id?: string;
+        };
+        publishedDate?: Date;
+        isDeleted?: boolean;
+        commentType?: string;
+    }>;
+    status?: number;
+    threadContext?: {
+        filePath?: string;
+        rightFileStart?: {
+            line?: number;
+            offset?: number;
+        };
+        rightFileEnd?: {
+            line?: number;
+            offset?: number;
+        };
+    };
+}
+
+interface GitVersionDescriptor {
+    version?: string;
+    versionType?: 'branch' | 'commit' | 'tag';
+}
+
+interface TeamMember {
+    identity?: {
+        id?: string;
+        displayName?: string;
+        uniqueName?: string;
+    };
+}
+
+interface Build {
+    id?: number;
+    buildNumber?: string;
+    status?: string;
+    result?: string;
+    _links?: {
+        web?: {
+            href?: string;
+        };
+    };
+    definition?: {
+        name?: string;
+    };
+}
+
+interface PolicyEvaluationRecord {
+    configuration?: {
+        id?: string;
+        type?: {
+            displayName?: string;
+        };
+        isBlocking?: boolean;
+    };
+    status?: string;
+}
+
+interface GitConflict {
+    conflictId?: number;
+    conflictPath?: string;
+    conflictType?: string;
+    mergeSourceCommit?: {
+        commitId?: string;
+    };
+    mergeTargetCommit?: {
+        commitId?: string;
+    };
+}
+
+interface WorkItemRelation {
+    rel?: string;
+    url?: string;
+}
+
+interface WorkItem {
+    id?: number;
+    fields?: {
+        [key: string]: unknown;
+        'System.Title'?: string;
+        'System.WorkItemType'?: string;
+        'System.State'?: string;
+        'System.AssignedTo'?: {
+            displayName?: string;
+        };
+    };
+    relations?: WorkItemRelation[];
+}
 
 export class AzureDevOpsService {
     private connection?: azdev.WebApi;
@@ -60,8 +232,9 @@ export class AzureDevOpsService {
         let token: string;
         try {
             token = await this.authProvider.getToken();
-        } catch (error: any) {
-            throw new Error(`Failed to get Azure CLI token: ${error.message}\n\nPlease ensure:\n1. Azure CLI is installed\n2. You are logged in with 'az login'\n3. Your account has access to Azure DevOps`);
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to get Azure CLI token: ${errorMessage}\n\nPlease ensure:\n1. Azure CLI is installed\n2. You are logged in with 'az login'\n3. Your account has access to Azure DevOps`);
         }
 
         // Ensure organization URL is properly formatted
@@ -79,8 +252,9 @@ export class AzureDevOpsService {
             const authHandler = azdev.getPersonalAccessTokenHandler(token);
             this.connection = new azdev.WebApi(orgUrl, authHandler);
             this.gitApi = await this.connection.getGitApi();
-        } catch (error: any) {
-            throw new Error(`Failed to initialize Azure DevOps connection: ${error.message || error}\n\nPlease verify:\n1. Your Azure account has access to the organization\n2. You have 'Code Read & Write' permissions`);
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to initialize Azure DevOps connection: ${errorMessage}\n\nPlease verify:\n1. Your Azure account has access to the organization\n2. You have 'Code Read & Write' permissions`);
         }
     }
 
@@ -92,7 +266,7 @@ export class AzureDevOpsService {
         }
 
         try {
-            const searchCriteria: any = {
+            const searchCriteria: Record<string, unknown> = {
                 status: status,
                 includeLinks: true
             };

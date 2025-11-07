@@ -134,3 +134,89 @@ export interface MergeConflict {
         commitId: string;
     };
 }
+
+// Azure DevOps API response types
+export interface AzureDevOpsApiResponse<T = unknown> {
+    count: number;
+    value: T[];
+}
+
+export interface GitItem {
+    objectId: string;
+    gitObjectType: string;
+    commitId: string;
+    path: string;
+    url: string;
+    isFolder?: boolean;
+    content?: string;
+}
+
+export interface GitCommitRef {
+    commitId: string;
+    author: {
+        name: string;
+        email: string;
+        date: string;
+    };
+    committer: {
+        name: string;
+        email: string;
+        date: string;
+    };
+    comment: string;
+    url: string;
+}
+
+export interface ThreadContext {
+    filePath: string;
+    rightFileStart?: { line: number; offset: number };
+    rightFileEnd?: { line: number; offset: number };
+    leftFileStart?: { line: number; offset: number };
+    leftFileEnd?: { line: number; offset: number };
+}
+
+export interface CommentPosition {
+    line: number;
+    offset: number;
+}
+
+export interface PRPolicy {
+    id: string;
+    type: {
+        id: string;
+        displayName: string;
+    };
+    isEnabled: boolean;
+    isBlocking: boolean;
+    settings: Record<string, unknown>;
+}
+
+export interface TeamContext {
+    project: string;
+    projectId?: string;
+    team?: string;
+    teamId?: string;
+}
+
+export interface IdentityRef {
+    id: string;
+    displayName: string;
+    uniqueName: string;
+    imageUrl?: string;
+    url?: string;
+}
+
+export interface WebApiTeam {
+    id: string;
+    name: string;
+    url: string;
+    description?: string;
+    identityUrl?: string;
+}
+
+export interface WebApiCreatePatchOperation {
+    op: string;
+    path: string;
+    value: unknown;
+    from?: string;
+}

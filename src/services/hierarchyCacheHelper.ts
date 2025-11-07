@@ -1,12 +1,22 @@
 import * as vscode from 'vscode';
 
+interface WorkItemDetails {
+    id: number;
+    parentId?: number;
+    [key: string]: unknown;
+}
+
+interface AzureDevOpsServiceInterface {
+    getWorkItemDetails(workItemId: number): Promise<WorkItemDetails | null>;
+}
+
 // Helper to build work item hierarchy cache
 export async function buildWorkItemHierarchyChain(
-    azureDevOpsService: any,
+    azureDevOpsService: AzureDevOpsServiceInterface,
     workItemId: number,
     maxLevel: number
-): Promise<any[]> {
-    const hierarchyChain: any[] = [];
+): Promise<WorkItemDetails[]> {
+    const hierarchyChain: WorkItemDetails[] = [];
     const config = vscode.workspace.getConfiguration('azureDevOpsPR');
     const debugEnabled = config.get<boolean>('debugWorkItemHierarchy', false);
     

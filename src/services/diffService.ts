@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PRFile, PullRequest } from '../types';
+import { PRFile, PullRequest, PRThread } from '../types';
 import { AzureDevOpsService } from './azureDevOpsService';
 
 export class DiffService {
@@ -99,7 +99,7 @@ export class DiffService {
             setTimeout(async () => {
                 try {
                     const threads = await this.azureDevOpsService.getPRThreads(pr.pullRequestId);
-                    const fileThreads = threads.filter((thread: any) => 
+                    const fileThreads = threads.filter((thread: PRThread) => 
                         thread.threadContext?.filePath === file.path
                     );
 
@@ -136,15 +136,15 @@ export class DiffService {
             throw new Error('No git repository found');
         }
         
-        // Check if we need to fetch the ref
-        if (ref.startsWith('origin/')) {
-            const branchName = ref.substring(7); // Remove 'origin/' prefix
-            
-            // Check if the local branch exists and is up to date
-            const branches = repo.state.refs;
-            const hasLocalBranch = branches?.some((b: any) => 
-                b.name === branchName && b.type === 0 // 0 = head/branch
-            );
+            // Check if we need to fetch the ref
+            if (ref.startsWith('origin/')) {
+                const branchName = ref.substring(7); // Remove 'origin/' prefix
+                
+                // Check if the local branch exists and is up to date
+                const branches = repo.state.refs;
+                const hasLocalBranch = branches?.some((b: { name?: string; type?: number }) => 
+                    b.name === branchName && b.type === 0 // 0 = head/branch
+                );
             
             if (!hasLocalBranch) {
                 // Only fetch if we don't have the branch locally

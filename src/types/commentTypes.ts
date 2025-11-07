@@ -40,3 +40,16 @@ export interface CommentActionContext {
     filePath: string;
     lineNumber: number;
 }
+
+export interface ChatMessage {
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: Date;
+}
+
+export interface ChatContext {
+    threadId: number;
+    messages: ChatMessage[];
+    filePath: string;
+    lineNumber: number;
+}

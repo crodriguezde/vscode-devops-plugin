@@ -31,7 +31,7 @@ export class AuthenticationManager {
             password: true,
             ignoreFocusOut: true,
             placeHolder: 'Paste your PAT here',
-            validateInput: (value: string) => {
+            validateInput: (value: string): string | null => {
                 if (!value || value.trim().length === 0) {
                     return 'PAT token cannot be empty';
                 }

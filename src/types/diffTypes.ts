@@ -2,6 +2,11 @@
  * Types for enhanced diff viewer
  */
 
+export interface CommitSelection {
+    leftCommitId: string;
+    rightCommitId: string;
+}
+
 export interface CommitInfo {
     commitId: string;
     comment: string;
@@ -33,11 +38,6 @@ export interface DiffChange {
     rightLineStart: number;
     rightLineEnd: number;
     content: string;
-}
-
-export interface CommitSelection {
-    leftCommitId: string;
-    rightCommitId: string;
 }
 
 export interface DiffViewerConfig {
